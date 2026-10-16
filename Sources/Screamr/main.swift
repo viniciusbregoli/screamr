@@ -26,9 +26,10 @@ final class App: NSObject, NSApplicationDelegate {
         setIcon("mic")
         NSApp.mainMenu = mainMenu()
 
-        guard Store.apiKey() != nil else {
+        // Fn still gets set up without a key, so it works as soon as one is saved in Settings.
+        if Store.apiKey() == nil {
             fail("No API key: add it in Dashboard > Settings")
-            return openDashboard()
+            openDashboard()
         }
         // Event tap and synthetic Cmd+V both need Accessibility; this shows the system prompt once.
         let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
