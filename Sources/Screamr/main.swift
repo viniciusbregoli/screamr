@@ -5,6 +5,7 @@ final class App: NSObject, NSApplicationDelegate {
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let fn = FnKey()
     private let recorder = Recorder()
+    private var ptt = PushToTalk()
     private var recording = false
     private var stateItem = NSMenuItem(title: "Hold Fn to dictate", action: nil, keyEquivalent: "")
 
@@ -21,9 +22,48 @@ final class App: NSObject, NSApplicationDelegate {
         }
         // Event tap and synthetic Cmd+V both need Accessibility; this shows the system prompt once.
         let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
-        fn.onChange = { [weak self] down in down ? self?.begin() : self?.finish() }
+        fn.onEvent = { [weak self] event in self?.handle(event) ?? false }
         if !trusted || !fn.start() {
             fail("Grant Accessibility in System Settings, then relaunch")
+        }
+    }
+
+    private func handle(_ event: FnKey.Event) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        switch event {
+        case .fnDown: perform(ptt.fnDown(at: now))
+        case .fnUp:
+            perform(ptt.fnUp(at: now))
+            DispatchQueue.main.asyncAfter(deadline: .now() + PushToTalk.tapWindow) { [weak self] in
+                guard let self else { return }
+                self.perform(self.ptt.tick(at: ProcessInfo.processInfo.systemUptime))
+            }
+        case .space:
+            guard ptt.space() else { return false }
+            perform(.lock)
+            return true
+        case .escape:
+            guard ptt.escape() else { return false }
+            perform(.cancel)
+            return true
+        }
+        return false
+    }
+
+    private func perform(_ action: PushToTalk.Action) {
+        switch action {
+        case .none: break
+        case .start: begin()
+        case .lock:
+            NSSound(named: "Morse")?.play()
+            stateItem.title = "Hands-free: press Fn to finish, Esc to cancel"
+        case .finish: finish()
+        case .cancel:
+            guard recording else { return }
+            recording = false
+            _ = recorder.stop()
+            NSSound(named: "Basso")?.play()
+            idle()
         }
     }
 
@@ -45,7 +85,7 @@ final class App: NSObject, NSApplicationDelegate {
         recording = false
         let take = recorder.stop()
         NSSound(named: "Pop")?.play()
-        // A quick tap of Fn is almost always accidental; don't bill a transcription for it.
+        // Very short locked takes are accidental; don't bill a transcription for them.
         guard take.seconds > 0.3, let key = apiKey() else { return idle() }
         setIcon("ellipsis")
         stateItem.title = "Transcribing..."
