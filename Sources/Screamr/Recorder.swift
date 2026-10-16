@@ -5,7 +5,9 @@ final class Recorder {
     /// Defaults key holding the Core Audio UID of the mic picked in Settings; empty means the system default.
     static let inputKey = "inputDevice"
 
-    private let engine = AVAudioEngine()
+    // A fresh engine per take: switching the device on a used engine leaves its input format stale,
+    // and installing the tap then throws.
+    private var engine = AVAudioEngine()
     private let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)!
     private var pcm = Data()
     private let lock = NSLock()
@@ -16,6 +18,7 @@ final class Recorder {
     func start(writingTo url: URL? = nil) throws {
         lock.withLock { pcm.removeAll(keepingCapacity: true) }
         file = try url.map { try AVAudioFile(forWriting: $0, settings: Self.aac(sampleRate: 16_000), commonFormat: .pcmFormatInt16, interleaved: true) }
+        engine = AVAudioEngine()
         let input = engine.inputNode
         selectInput(input)
         let source = input.outputFormat(forBus: 0)
@@ -54,23 +57,18 @@ final class Recorder {
         return (Self.wav(samples, sampleRate: 16_000), Double(samples.count) / 2 / 16_000)
     }
 
-    /// Points the engine at the chosen mic, or back at the system default when none is chosen or it was unplugged.
+    /// Points a fresh engine at the chosen mic. With none chosen, or the chosen one unplugged,
+    /// the engine keeps the system default.
     private func selectInput(_ input: AVAudioInputNode) {
-        guard let unit = input.audioUnit else { return }
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        guard let uid = UserDefaults.standard.string(forKey: Self.inputKey), !uid.isEmpty, let unit = input.audioUnit else { return }
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslateUIDToDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var device = AudioDeviceID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        if let uid = UserDefaults.standard.string(forKey: Self.inputKey), !uid.isEmpty {
-            addr.mSelector = kAudioHardwarePropertyTranslateUIDToDevice
-            var cfUID = uid as CFString
-            _ = withUnsafePointer(to: &cfUID) {
-                AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, UInt32(MemoryLayout<CFString>.size), $0, &size, &device)
-            }
+        var cfUID = uid as CFString
+        _ = withUnsafePointer(to: &cfUID) {
+            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, UInt32(MemoryLayout<CFString>.size), $0, &size, &device)
         }
-        if device == kAudioObjectUnknown {
-            addr.mSelector = kAudioHardwarePropertyDefaultInputDevice
-            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &device)
-        }
+        guard device != kAudioObjectUnknown else { return }
         AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, size)
     }
 
