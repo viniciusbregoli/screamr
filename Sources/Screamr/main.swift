@@ -118,7 +118,7 @@ final class App: NSObject, NSApplicationDelegate {
                 let raw = try await Scribe.transcribe(wav: take.wav, apiKey: key, keyterms: store.keyterms)
                 let text = store.postProcess(raw)
                 if !text.isEmpty {
-                    Paster.insert(text + " ")
+                    Paster.insert(text.hasSuffix("\n") ? text : text + " ")
                     store.history.insert(Dictation(date: Date(), text: text, app: app, seconds: take.seconds), at: 0)
                 }
                 idle()

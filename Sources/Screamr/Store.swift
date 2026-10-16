@@ -75,7 +75,7 @@ final class Store: ObservableObject {
     }
 
     func postProcess(_ text: String) -> String {
-        TextRules.apply(text, replacements: replacements, snippets: snippets.map { ($0.trigger, $0.expansion) })
+        TextRules.apply(TextRules.endSentence(TextRules.spokenPunctuation(text)), replacements: replacements, snippets: snippets.map { ($0.trigger, $0.expansion) })
     }
 
     func refreshMeetings() {

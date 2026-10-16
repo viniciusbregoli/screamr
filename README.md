@@ -39,6 +39,15 @@ After each meeting, every speaker with at least 3 seconds of speech gets a voice
 
 Each meeting folder keeps `mic.words.json` / `system.words.json` (Scribe's word timings) and `speakers.json` (speaker to person), so transcripts are re-rendered locally after renames, without paying Scribe again. Meetings recorded before this feature keep generic labels until re-transcribed.
 
+## iPhone
+
+`ios/` is a meeting recorder for in-person meetings: tap record, lock the phone, tap stop, and the recording is transcribed by Scribe with speakers separated. It shares the Scribe client, transcript rendering and palette with the Mac app, and keeps the same folder layout (`mic.m4a`, `mic.words.json`, `transcript.md`) under Documents/Meetings, which the Files app can browse. The API key goes in the app's Settings and is stored in the Keychain. Requires iOS 17 and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+
+```sh
+ios/run.sh          # booted simulator
+ios/run.sh device   # connected iPhone (or DEVICE=<udid>)
+```
+
 ## Test
 
 ```sh

@@ -26,4 +26,36 @@ enum TextRules {
         }
         return out
     }
+
+    /// Scribe keeps ? and ! but drops the final period on statements, so back-to-back takes run together.
+    /// Single words are left bare: they're usually names or search terms, not sentences.
+    static func endSentence(_ text: String) -> String {
+        guard let last = text.last, last.isLetter || last.isNumber, text.split(separator: " ").count > 1 else { return text }
+        return text + "."
+    }
+
+    /// Spoken commands Scribe leaves as words. It already turns "comma", "period", "question mark",
+    /// "vírgula" and "ponto final" into symbols on its own, and tells them apart from the plain words.
+    /// "dois pontos" is left to Scribe too, since "ganhamos dois pontos" is just as likely.
+    static let commands: [(words: [String], symbol: String)] = [
+        (["new paragraph", "novo parágrafo"], "\n\n"),
+        (["new line", "nova linha"], "\n"),
+        (["semicolon", "ponto e vírgula"], ";"),
+        (["colon"], ":"),
+        (["exclamation mark", "exclamation point", "ponto de exclamação"], "!"),
+        (["question mark", "ponto de interrogação"], "?"),
+    ]
+
+    /// Replaces spoken commands with their symbol, eating the comma or period Scribe tends to put around them.
+    static func spokenPunctuation(_ text: String) -> String {
+        var out = text
+        for (words, symbol) in commands {
+            let names = words.map(NSRegularExpression.escapedPattern).joined(separator: "|")
+            // Line breaks swallow the space after them; symbols keep it so the next word stays separated.
+            let after = symbol.hasPrefix("\n") ? "[.,]?\\s*" : "[.,]?"
+            guard let regex = try? NSRegularExpression(pattern: ",?\\s*\\b(?:\(names))\\b" + after, options: [.caseInsensitive, .useUnicodeWordBoundaries]) else { continue }
+            out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: NSRegularExpression.escapedTemplate(for: symbol))
+        }
+        return out
+    }
 }

@@ -11,3 +11,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: swift build -c release
       - run: swift test
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: cd ios && xcodegen generate
+      - run: >
+          xcodebuild -project ios/ScreamrMobile.xcodeproj -scheme Screamr
+          -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -quiet build

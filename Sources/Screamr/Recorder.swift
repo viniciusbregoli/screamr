@@ -1,8 +1,13 @@
 import AVFoundation
 
-/// Captures the default input as 16 kHz mono PCM16, the format Scribe handles natively.
+/// Captures the chosen input as 16 kHz mono PCM16, the format Scribe handles natively.
 final class Recorder {
-    private let engine = AVAudioEngine()
+    /// Defaults key holding the Core Audio UID of the mic picked in Settings; empty means the system default.
+    static let inputKey = "inputDevice"
+
+    // A fresh engine per take: switching the device on a used engine leaves its input format stale,
+    // and installing the tap then throws.
+    private var engine = AVAudioEngine()
     private let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)!
     private var pcm = Data()
     private let lock = NSLock()
@@ -13,7 +18,9 @@ final class Recorder {
     func start(writingTo url: URL? = nil) throws {
         lock.withLock { pcm.removeAll(keepingCapacity: true) }
         file = try url.map { try AVAudioFile(forWriting: $0, settings: Self.aac(sampleRate: 16_000), commonFormat: .pcmFormatInt16, interleaved: true) }
+        engine = AVAudioEngine()
         let input = engine.inputNode
+        selectInput(input)
         let source = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: source, to: target) else {
             throw NSError(domain: "Screamr", code: 1, userInfo: [NSLocalizedDescriptionKey: "No converter for \(source)"])
@@ -48,6 +55,27 @@ final class Recorder {
         file = nil // closing the AVAudioFile finalizes the m4a
         let samples = lock.withLock { pcm }
         return (Self.wav(samples, sampleRate: 16_000), Double(samples.count) / 2 / 16_000)
+    }
+
+    /// Points a fresh engine at the chosen mic. With none chosen, or the chosen one unplugged,
+    /// the engine keeps the system default.
+    private func selectInput(_ input: AVAudioInputNode) {
+        guard let uid = UserDefaults.standard.string(forKey: Self.inputKey), !uid.isEmpty, let unit = input.audioUnit else { return }
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslateUIDToDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var device = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var cfUID = uid as CFString
+        _ = withUnsafePointer(to: &cfUID) {
+            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, UInt32(MemoryLayout<CFString>.size), $0, &size, &device)
+        }
+        guard device != kAudioObjectUnknown else { return }
+        AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, size)
+    }
+
+    /// Mics the user can pick, as (Core Audio UID, name).
+    static func inputs() -> [(id: String, name: String)] {
+        AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
+            .devices.map { ($0.uniqueID, $0.localizedName) }
     }
 
     static func aac(sampleRate: Double) -> [String: Any] {
