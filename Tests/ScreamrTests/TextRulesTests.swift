@@ -20,3 +20,12 @@ import Testing
 @Test func emptyRulesLeaveTextAlone() {
     #expect(TextRules.apply("Hello.", replacements: [("", "x")]) == "Hello.")
 }
+
+@Test func statementsGetAFinalPeriodButSingleWordsDoNot() {
+    #expect(TextRules.endSentence("Now I want something else") == "Now I want something else.")
+    #expect(TextRules.endSentence("Estamos quase lá?") == "Estamos quase lá?")
+    #expect(TextRules.endSentence("Scheiße!") == "Scheiße!")
+    #expect(TextRules.endSentence("Version 2") == "Version 2.")
+    #expect(TextRules.endSentence("Kinebot") == "Kinebot")
+    #expect(TextRules.endSentence("") == "")
+}
