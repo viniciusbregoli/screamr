@@ -38,3 +38,12 @@ import Testing
     #expect(TextRules.spokenPunctuation("Ganhamos dois pontos hoje") == "Ganhamos dois pontos hoje")
     #expect(TextRules.endSentence(TextRules.spokenPunctuation("first line, new line")) == "first line\n")
 }
+
+@Test func phrasesEndingInSymbolsStillMatch() {
+    #expect(TextRules.apply("Use C++ today", replacements: [("C++", "C plus plus")]) == "Use C plus plus today")
+    #expect(TextRules.apply("Use Cpp++x", replacements: [("C++", "nope")]) == "Use Cpp++x")
+}
+
+@Test func emptySnippetTriggerNeverMatchesPunctuationOnlyText() {
+    #expect(TextRules.apply(".", replacements: [], snippets: [(trigger: "", expansion: "boom")]) == ".")
+}
