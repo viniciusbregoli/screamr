@@ -27,11 +27,17 @@ First launch asks for **Accessibility** (hotkeys and pasting; relaunch after gra
 
 ## Dashboard
 
-Home (stats and dictation history), Meetings (transcripts, re-transcribe), Dictionary, Snippets and Settings, in Catppuccin Mocha. Inside it: Cmd+1 to Cmd+5 switch sections, Cmd+K opens the command palette, `/` searches history, `?` lists shortcuts, Cmd+N adds an entry, Cmd+Plus / Cmd+Minus / Cmd+0 zoom, Esc closes.
+Home (stats and dictation history), Meetings (transcripts, re-transcribe), People, Dictionary, Snippets and Settings, in Catppuccin Mocha. Inside it: Cmd+1 to Cmd+6 switch sections, Cmd+K opens the command palette, `/` searches history, `?` lists shortcuts, Cmd+N adds an entry, Cmd+Plus / Cmd+Minus / Cmd+0 zoom, Esc closes.
 
 Dictionary words are sent to Scribe as key terms. A replacement also rewrites what Scribe heard, which is how to fix names that sound like common words (Screamer to screamr). Snippets expand a spoken trigger phrase into text. Data lives in `~/Library/Application Support/Screamr/`.
 
 Meetings are saved to `~/Library/Application Support/Screamr/Meetings/<date>/` as `mic.m4a`, `system.m4a` and `transcript.md`. The mic channel is labeled "You" (or "Room N" when several people share the mic); call audio is diarized into "Speaker N". Use headphones on calls, otherwise the mic also picks up the other side.
+
+## People
+
+After each meeting, every speaker with at least 3 seconds of speech gets a voice fingerprint, computed on this Mac with [FluidAudio](https://github.com/FluidInference/FluidAudio) (its Core ML models download once on first use). Fingerprints are matched against known people, so the same voice gets the same label in every meeting: "Unknown 3" until you name them in the People section, then their name, in past transcripts too. Unnamed people heard in two or more meetings are flagged as "Appears often". A lone voice on the mic starts out named "You". If one person gets split in two, merge them.
+
+Each meeting folder keeps `mic.words.json` / `system.words.json` (Scribe's word timings) and `speakers.json` (speaker to person), so transcripts are re-rendered locally after renames, without paying Scribe again. Meetings recorded before this feature keep generic labels until re-transcribed.
 
 ## Test
 
