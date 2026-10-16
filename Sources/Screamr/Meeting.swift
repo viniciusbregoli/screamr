@@ -13,7 +13,8 @@ final class Meeting {
 
     init() throws {
         let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH.mm"
+        // Seconds, so two meetings started in the same minute get separate folders.
+        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
         let stamp = f.string(from: Date())
         title = "Meeting \(stamp)"
         dir = Self.root.appendingPathComponent(stamp, isDirectory: true)

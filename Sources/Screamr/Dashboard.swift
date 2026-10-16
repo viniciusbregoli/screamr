@@ -630,6 +630,8 @@ private struct SettingsPane: View {
                 group("General") {
                     Toggle("Launch screamr at login", isOn: $launchAtLogin)
                         .onChange(of: launchAtLogin) { _, on in
+                            // Also skips the change made by the rollback below, so a failure can't bounce the toggle.
+                            guard on != (SMAppService.mainApp.status == .enabled) else { return }
                             do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister(); loginError = nil }
                             catch { loginError = error.localizedDescription; launchAtLogin = !on }
                         }
