@@ -10,6 +10,8 @@ enum Paster {
 
         pb.clearContents()
         pb.setString(text, forType: .string)
+        // nspasteboard.org convention: clipboard managers skip items carrying this type.
+        pb.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
         let ourChange = pb.changeCount
 
         let src = CGEventSource(stateID: .combinedSessionState)
