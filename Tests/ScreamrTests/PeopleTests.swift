@@ -52,3 +52,8 @@ private func unit(_ v: [Float]) -> [Float] { VoicePrinter.mean([v]) }
     #expect(clips.map(\.count) == [Int(10 * rate), Int(10 * rate), Int(5 * rate)])
     #expect(VoicePrinter.clips(samples: [Float](repeating: 0.1, count: Int(21 * rate))).count == 2) // 1 s tail dropped
 }
+
+@Test func excerptsEndOnWordBoundary() {
+    #expect(Meeting.excerpt("short") == "short")
+    #expect(Meeting.excerpt("alpha beta gamma", limit: 12) == "alpha beta\u{2026}")
+}
