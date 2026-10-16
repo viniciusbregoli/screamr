@@ -1,0 +1,22 @@
+import Testing
+@testable import Screamr
+
+@Test func replacesWholeWordsCaseInsensitively() {
+    let out = TextRules.apply("Testing Screamer meetings, not screamers.", replacements: [("screamer", "screamr")])
+    #expect(out == "Testing screamr meetings, not screamers.")
+}
+
+@Test func longestPhraseWinsAndExpansionsAreNotReplacedAgain() {
+    let out = TextRules.apply("ship it to my email today", replacements: [("email", "mail"), ("my email", "me@example.com")])
+    #expect(out == "ship it to me@example.com today")
+}
+
+@Test func snippetTriggerAloneBecomesExpansion() {
+    let snippets = [(trigger: "my address", expansion: "Rua X, 123\nSao Paulo")]
+    #expect(TextRules.apply("My address.", replacements: [], snippets: snippets) == "Rua X, 123\nSao Paulo")
+    #expect(TextRules.apply("Send it to my address please.", replacements: [], snippets: snippets) == "Send it to Rua X, 123\nSao Paulo please.")
+}
+
+@Test func emptyRulesLeaveTextAlone() {
+    #expect(TextRules.apply("Hello.", replacements: [("", "x")]) == "Hello.")
+}
