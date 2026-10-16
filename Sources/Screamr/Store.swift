@@ -43,6 +43,7 @@ final class Store: ObservableObject {
     @Published var history: [Dictation] { didSet { save(history, "history.json") } }
     @Published var dictionary: [DictionaryEntry] { didSet { save(dictionary, "dictionary.json") } }
     @Published var snippets: [Snippet] { didSet { save(snippets, "snippets.json") } }
+    @Published var people: [Person] { didSet { save(people, "people.json") } }
     @Published var meetings: [MeetingInfo] = []
     @Published var meetingActive = false
     @Published var transcribingMeeting = false
@@ -54,6 +55,7 @@ final class Store: ObservableObject {
         history = Self.load(dir, "history.json") ?? []
         dictionary = Self.load(dir, "dictionary.json") ?? []
         snippets = Self.load(dir, "snippets.json") ?? []
+        people = Self.load(dir, "people.json") ?? []
         refreshMeetings()
     }
 
@@ -65,6 +67,11 @@ final class Store: ObservableObject {
 
     var replacements: [(from: String, to: String)] {
         dictionary.filter { !$0.replacement.isEmpty }.map { ($0.phrase, $0.replacement) }
+    }
+
+    /// Resolves a person by id, following merges.
+    func person(_ id: UUID) -> Person? {
+        people.first { $0.id == id || $0.mergedIDs.contains(id) }
     }
 
     func postProcess(_ text: String) -> String {

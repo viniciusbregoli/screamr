@@ -31,6 +31,13 @@ private func w(_ text: String, _ start: Double, _ speaker: String = "speaker_0")
     #expect(segs.map(\.text) == ["A", "B"])
 }
 
+@Test func recognizedPeopleOverrideDefaultLabels() {
+    let md = Transcript.markdown(title: "T", mic: [w("Hi.", 0)], system: [w("Yo.", 2, "speaker_3")],
+                                 names: ["system:speaker_3": "Ana", "mic:speaker_0": "Vinicius"])
+    #expect(md.contains("Vinicius:** Hi."))
+    #expect(md.contains("Ana:** Yo."))
+}
+
 @Test func emptyMeetingSaysSo() {
     #expect(Transcript.markdown(title: "T", mic: [], system: []).contains("No speech detected"))
 }
