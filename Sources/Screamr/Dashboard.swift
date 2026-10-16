@@ -586,6 +586,7 @@ private struct SettingsPane: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
     @State private var refresh = 0
+    @AppStorage(Recorder.inputKey) private var input = ""
 
     var body: some View {
         ScrollView {
@@ -612,6 +613,19 @@ private struct SettingsPane: View {
                                granted: mic == .authorized ? true : mic == .notDetermined ? nil : false, pane: "Privacy_Microphone",
                                request: mic == .notDetermined ? { AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { refresh += 1 } } } : nil)
                     permission("System Audio Recording", detail: "Call audio in meetings, asked on your first recording", granted: nil, pane: "Privacy_AudioCapture")
+                }
+                group("Microphone") {
+                    let _ = refresh
+                    let inputs = Recorder.inputs()
+                    Picker("Input", selection: $input) {
+                        Text("System default").tag("")
+                        ForEach(inputs, id: \.id) { Text($0.name).tag($0.id) }
+                        if !input.isEmpty, !inputs.contains(where: { $0.id == input }) {
+                            Text("Disconnected mic (using system default)").tag(input)
+                        }
+                    }
+                    .frame(maxWidth: 420)
+                    Text("Used for dictation and meetings, from the next recording on.").zfont(10).foregroundStyle(Mocha.subtext0)
                 }
                 group("General") {
                     Toggle("Launch screamr at login", isOn: $launchAtLogin)
