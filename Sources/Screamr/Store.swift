@@ -93,8 +93,10 @@ final class Store: ObservableObject {
 
     static func saveAPIKey(_ key: String) throws {
         try FileManager.default.createDirectory(at: keyFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: keyFile.path, contents: Data(key.trimmingCharacters(in: .whitespacesAndNewlines).utf8),
-                                       attributes: [.posixPermissions: 0o600])
+        guard FileManager.default.createFile(atPath: keyFile.path, contents: Data(key.trimmingCharacters(in: .whitespacesAndNewlines).utf8),
+                                             attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: keyFile.path])
+        }
     }
 
     private static func load<T: Decodable>(_ dir: URL, _ name: String) -> T? {
