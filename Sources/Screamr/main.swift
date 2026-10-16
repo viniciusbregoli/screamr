@@ -8,10 +8,22 @@ final class App: NSObject, NSApplicationDelegate {
     private var ptt = PushToTalk()
     private var recording = false
     private var stateItem = NSMenuItem(title: "Hold Fn to dictate", action: nil, keyEquivalent: "")
+    private lazy var meetingItem: NSMenuItem = {
+        let item = NSMenuItem(title: "Start Meeting Recording", action: #selector(toggleMeeting), keyEquivalent: "m")
+        item.keyEquivalentModifierMask = [.control, .option, .command]
+        item.target = self
+        return item
+    }()
+    private var meeting: Meeting?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         let menu = NSMenu()
         menu.addItem(stateItem)
+        menu.addItem(.separator())
+        menu.addItem(meetingItem)
+        let folder = NSMenuItem(title: "Open Meetings Folder", action: #selector(openMeetings), keyEquivalent: "")
+        folder.target = self
+        menu.addItem(folder)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Screamr", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         status.menu = menu
@@ -45,6 +57,9 @@ final class App: NSObject, NSApplicationDelegate {
         case .escape:
             guard ptt.escape() else { return false }
             perform(.cancel)
+            return true
+        case .meetingToggle:
+            toggleMeeting()
             return true
         }
         return false
@@ -98,6 +113,44 @@ final class App: NSObject, NSApplicationDelegate {
                 fail(error.localizedDescription)
             }
         }
+    }
+
+    @objc private func toggleMeeting() {
+        guard let current = meeting else {
+            do {
+                meeting = try Meeting()
+                meetingItem.title = "Stop Meeting Recording"
+                NSSound(named: "Hero")?.play()
+                if let err = meeting?.systemError { NSLog("screamr: recording mic only, %@", err) }
+            } catch {
+                fail("Meeting error: \(error.localizedDescription)")
+            }
+            return
+        }
+        meeting = nil
+        meetingItem.title = "Transcribing Meeting..."
+        meetingItem.isEnabled = false
+        let hasSystem = current.stop()
+        NSSound(named: "Bottle")?.play()
+        Task { @MainActor in
+            defer {
+                meetingItem.title = "Start Meeting Recording"
+                meetingItem.isEnabled = true
+            }
+            guard let key = apiKey() else { return fail("No API key") }
+            do {
+                NSWorkspace.shared.open(try await current.transcribe(includeSystem: hasSystem, apiKey: key))
+            } catch {
+                // Audio stays on disk, so a failed transcription loses nothing.
+                fail("Meeting transcription failed: \(error.localizedDescription)")
+                NSWorkspace.shared.open(current.dir)
+            }
+        }
+    }
+
+    @objc private func openMeetings() {
+        try? FileManager.default.createDirectory(at: Meeting.root, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(Meeting.root)
     }
 
     private func idle() {
