@@ -5,32 +5,30 @@ final class App: NSObject, NSApplicationDelegate {
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let fn = FnKey()
     private let recorder = Recorder()
+    private let store = Store.shared
+    private let dashboard = DashboardWindow()
     private var ptt = PushToTalk()
     private var recording = false
+    private var targetApp: String?
     private var stateItem = NSMenuItem(title: "Hold Fn to dictate", action: nil, keyEquivalent: "")
-    private lazy var meetingItem: NSMenuItem = {
-        let item = NSMenuItem(title: "Start Meeting Recording", action: #selector(toggleMeeting), keyEquivalent: "m")
-        item.keyEquivalentModifierMask = [.control, .option, .command]
-        item.target = self
-        return item
-    }()
+    private lazy var meetingItem = item("Start Meeting Recording", #selector(toggleMeeting), "m", [.control, .option, .command])
     private var meeting: Meeting?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         let menu = NSMenu()
         menu.addItem(stateItem)
         menu.addItem(.separator())
+        menu.addItem(item("Open Dashboard", #selector(openDashboard), "d", [.control, .option, .command]))
         menu.addItem(meetingItem)
-        let folder = NSMenuItem(title: "Open Meetings Folder", action: #selector(openMeetings), keyEquivalent: "")
-        folder.target = self
-        menu.addItem(folder)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Screamr", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         status.menu = menu
         setIcon("mic")
+        NSApp.mainMenu = mainMenu()
 
-        guard apiKey() != nil else {
-            return fail("No API key: set ELEVEN_LABS_API_KEY or write it to ~/.config/screamr/api_key")
+        guard Store.apiKey() != nil else {
+            fail("No API key: add it in Dashboard > Settings")
+            return openDashboard()
         }
         // Event tap and synthetic Cmd+V both need Accessibility; this shows the system prompt once.
         let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
@@ -38,6 +36,12 @@ final class App: NSObject, NSApplicationDelegate {
         if !trusted || !fn.start() {
             fail("Grant Accessibility in System Settings, then relaunch")
         }
+    }
+
+    // Clicking the Dock icon while the dashboard is closed reopens it.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { openDashboard() }
+        return true
     }
 
     private func handle(_ event: FnKey.Event) -> Bool {
@@ -60,6 +64,9 @@ final class App: NSObject, NSApplicationDelegate {
             return true
         case .meetingToggle:
             toggleMeeting()
+            return true
+        case .dashboard:
+            openDashboard()
             return true
         }
         return false
@@ -87,6 +94,7 @@ final class App: NSObject, NSApplicationDelegate {
         do {
             try recorder.start()
             recording = true
+            targetApp = NSWorkspace.shared.frontmostApplication?.localizedName
             NSSound(named: "Tink")?.play()
             setIcon("mic.fill")
             stateItem.title = "Listening..."
@@ -101,13 +109,18 @@ final class App: NSObject, NSApplicationDelegate {
         let take = recorder.stop()
         NSSound(named: "Pop")?.play()
         // Very short locked takes are accidental; don't bill a transcription for them.
-        guard take.seconds > 0.3, let key = apiKey() else { return idle() }
+        guard take.seconds > 0.3, let key = Store.apiKey() else { return idle() }
         setIcon("ellipsis")
         stateItem.title = "Transcribing..."
+        let app = targetApp
         Task { @MainActor in
             do {
-                let text = try await Scribe.transcribe(wav: take.wav, apiKey: key)
-                if !text.isEmpty { Paster.insert(text + " ") }
+                let raw = try await Scribe.transcribe(wav: take.wav, apiKey: key, keyterms: store.keyterms)
+                let text = store.postProcess(raw)
+                if !text.isEmpty {
+                    Paster.insert(text + " ")
+                    store.history.insert(Dictation(date: Date(), text: text, app: app, seconds: take.seconds), at: 0)
+                }
                 idle()
             } catch {
                 fail(error.localizedDescription)
@@ -117,8 +130,10 @@ final class App: NSObject, NSApplicationDelegate {
 
     @objc private func toggleMeeting() {
         guard let current = meeting else {
+            guard !store.transcribingMeeting else { return }
             do {
                 meeting = try Meeting()
+                store.meetingActive = true
                 meetingItem.title = "Stop Meeting Recording"
                 NSSound(named: "Hero")?.play()
                 if let err = meeting?.systemError { NSLog("screamr: recording mic only, %@", err) }
@@ -128,29 +143,78 @@ final class App: NSObject, NSApplicationDelegate {
             return
         }
         meeting = nil
-        meetingItem.title = "Transcribing Meeting..."
-        meetingItem.isEnabled = false
+        store.meetingActive = false
         let hasSystem = current.stop()
         NSSound(named: "Bottle")?.play()
+        transcribe(MeetingInfo(dir: current.dir, title: current.title), includeSystem: hasSystem, openWhenDone: true)
+    }
+
+    private func transcribe(_ m: MeetingInfo, includeSystem: Bool, openWhenDone: Bool) {
+        guard let key = Store.apiKey() else { return fail("No API key") }
+        store.transcribingMeeting = true
+        meetingItem.title = "Transcribing Meeting..."
+        meetingItem.isEnabled = false
+        store.refreshMeetings()
         Task { @MainActor in
             defer {
+                store.transcribingMeeting = false
+                store.refreshMeetings()
                 meetingItem.title = "Start Meeting Recording"
                 meetingItem.isEnabled = true
             }
-            guard let key = apiKey() else { return fail("No API key") }
             do {
-                NSWorkspace.shared.open(try await current.transcribe(includeSystem: hasSystem, apiKey: key))
+                let url = try await Meeting.transcribe(dir: m.dir, title: m.title, includeSystem: includeSystem, apiKey: key, store: store)
+                if openWhenDone { NSWorkspace.shared.open(url) }
             } catch {
-                // Audio stays on disk, so a failed transcription loses nothing.
+                // Audio stays on disk, so a failed transcription loses nothing; retry from the dashboard.
                 fail("Meeting transcription failed: \(error.localizedDescription)")
-                NSWorkspace.shared.open(current.dir)
             }
         }
     }
 
-    @objc private func openMeetings() {
-        try? FileManager.default.createDirectory(at: Meeting.root, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(Meeting.root)
+    @objc private func openDashboard() {
+        dashboard.show(store: store, actions: DashboardActions(
+            toggleMeeting: { [weak self] in self?.toggleMeeting() },
+            retranscribe: { [weak self] m in
+                let system = m.dir.appendingPathComponent("system.m4a")
+                self?.transcribe(m, includeSystem: FileManager.default.fileExists(atPath: system.path), openWhenDone: false)
+            }
+        ))
+    }
+
+    /// The dashboard puts screamr in the Dock, so it needs a real menu bar: without an Edit menu,
+    /// Cmd+C/V/A don't work in its text fields.
+    private func mainMenu() -> NSMenu {
+        let main = NSMenu()
+        func sub(_ title: String, _ items: [NSMenuItem]) {
+            let menu = NSMenu(title: title)
+            items.forEach(menu.addItem)
+            let holder = NSMenuItem()
+            holder.submenu = menu
+            main.addItem(holder)
+        }
+        sub("screamr", [NSMenuItem(title: "Quit screamr", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")])
+        sub("Edit", [
+            NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"),
+            NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "Z"),
+            .separator(),
+            NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"),
+            NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"),
+            NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"),
+            NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"),
+        ])
+        sub("Window", [
+            NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"),
+            NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"),
+        ])
+        return main
+    }
+
+    private func item(_ title: String, _ action: Selector, _ key: String, _ mods: NSEvent.ModifierFlags) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.keyEquivalentModifierMask = mods
+        item.target = self
+        return item
     }
 
     private func idle() {
@@ -166,13 +230,6 @@ final class App: NSObject, NSApplicationDelegate {
 
     private func setIcon(_ symbol: String) {
         status.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Screamr")
-    }
-
-    private func apiKey() -> String? {
-        if let env = ProcessInfo.processInfo.environment["ELEVEN_LABS_API_KEY"], !env.isEmpty { return env }
-        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/screamr/api_key")
-        let key = (try? String(contentsOf: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return key?.isEmpty == false ? key : nil
     }
 }
 

@@ -4,7 +4,7 @@ import Foundation
 /// System-wide Fn (Globe), Space and Esc events through a filtering event tap, so keys
 /// used as dictation gestures can be kept away from the focused app.
 final class FnKey {
-    enum Event { case fnDown, fnUp, space, escape, meetingToggle }
+    enum Event { case fnDown, fnUp, space, escape, meetingToggle, dashboard }
 
     /// Return true to swallow the key. Fn itself is never swallowed.
     var onEvent: ((Event) -> Bool)?
@@ -39,8 +39,12 @@ final class FnKey {
         if type == .keyDown {
             guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return false }
             let hyper: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand]
-            if keycode == 46, event.flags.intersection([.maskControl, .maskAlternate, .maskCommand, .maskShift]) == hyper {
-                return onEvent?(.meetingToggle) ?? false // Ctrl+Opt+Cmd+M
+            if event.flags.intersection([.maskControl, .maskAlternate, .maskCommand, .maskShift]) == hyper {
+                switch keycode {
+                case 46: return onEvent?(.meetingToggle) ?? false // Ctrl+Opt+Cmd+M
+                case 2: return onEvent?(.dashboard) ?? false // Ctrl+Opt+Cmd+D
+                default: break
+                }
             }
             switch keycode {
             case 49: return onEvent?(.space) ?? false
