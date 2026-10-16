@@ -482,10 +482,16 @@ private struct SettingsPane: View {
                 }
                 group("Permissions") {
                     let _ = refresh
-                    permission("Accessibility", detail: "Hotkeys and pasting", granted: AXIsProcessTrusted(), pane: "Privacy_Accessibility")
-                    permission("Microphone", detail: "Dictation and meetings", granted: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized, pane: "Privacy_Microphone")
+                    let mic = AVCaptureDevice.authorizationStatus(for: .audio)
+                    permission("Accessibility", detail: "Hotkeys and pasting. After granting, quit and reopen screamr.",
+                               granted: AXIsProcessTrusted(), pane: "Privacy_Accessibility") {
+                        // Shows the system prompt and adds screamr to the list, so there's nothing to add by hand.
+                        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
+                    }
+                    permission("Microphone", detail: mic == .notDetermined ? "Dictation and meetings. Not asked yet." : "Dictation and meetings",
+                               granted: mic == .authorized ? true : mic == .notDetermined ? nil : false, pane: "Privacy_Microphone",
+                               request: mic == .notDetermined ? { AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { refresh += 1 } } } : nil)
                     permission("System Audio Recording", detail: "Call audio in meetings, asked on your first recording", granted: nil, pane: "Privacy_AudioCapture")
-                    Button("Check again") { refresh += 1 }
                 }
                 group("General") {
                     Toggle("Launch screamr at login", isOn: $launchAtLogin)
@@ -499,6 +505,7 @@ private struct SettingsPane: View {
             }
             .padding(28)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh += 1 }
     }
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -511,7 +518,8 @@ private struct SettingsPane: View {
         .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func permission(_ name: String, detail: String, granted: Bool?, pane: String) -> some View {
+    /// `granted` nil means unknown or not asked yet. With `request`, the button asks macOS directly.
+    private func permission(_ name: String, detail: String, granted: Bool?, pane: String, request: (() -> Void)? = nil) -> some View {
         HStack {
             Image(systemName: granted == true ? "checkmark.circle.fill" : granted == false ? "xmark.circle.fill" : "questionmark.circle")
                 .foregroundStyle(granted == true ? Mocha.green : granted == false ? Mocha.red : Mocha.overlay0)
@@ -520,8 +528,12 @@ private struct SettingsPane: View {
                 Text(detail).zfont(10).foregroundStyle(Mocha.subtext0)
             }
             Spacer()
-            Button("Open Settings") {
-                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!)
+            if let request, granted != true {
+                Button("Allow", action: request)
+            } else {
+                Button("Open Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!)
+                }
             }
         }
     }

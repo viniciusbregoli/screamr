@@ -33,8 +33,11 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-# Ad-hoc signature: macOS ties Accessibility/Mic grants to it, so a rebuild may need re-granting.
-codesign --force --sign - "$app"
+# macOS ties Accessibility/Mic grants to the signature. An ad-hoc signature changes on every
+# build (so grants get lost); a real certificate keeps them. Override with SIGN_IDENTITY=...
+identity=${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development[^"]*\)".*/\1/p' | head -1)}
+codesign --force --sign "${identity:--}" "$app"
+echo "Signed with ${identity:-ad-hoc signature}"
 echo "Built $app"
 if [ "$1" = install ]; then
   pkill -x Screamr || true
