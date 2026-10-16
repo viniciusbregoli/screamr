@@ -7,8 +7,12 @@ final class Recorder {
     private var pcm = Data()
     private let lock = NSLock()
 
-    func start() throws {
+    /// With `url`, audio streams to an AAC file on disk (long meetings) instead of memory.
+    private var file: AVAudioFile?
+
+    func start(writingTo url: URL? = nil) throws {
         lock.withLock { pcm.removeAll(keepingCapacity: true) }
+        file = try url.map { try AVAudioFile(forWriting: $0, settings: Self.aac(sampleRate: 16_000), commonFormat: .pcmFormatInt16, interleaved: true) }
         let input = engine.inputNode
         let source = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: source, to: target) else {
@@ -25,6 +29,10 @@ final class Recorder {
                 status.pointee = .haveData
                 return buffer
             }
+            if let file = self.file {
+                try? file.write(from: out)
+                return
+            }
             let bytes = Int(out.frameLength) * 2
             guard bytes > 0, let ptr = out.int16ChannelData?[0] else { return }
             self.lock.withLock { self.pcm.append(Data(bytes: ptr, count: bytes)) }
@@ -37,8 +45,13 @@ final class Recorder {
     func stop() -> (wav: Data, seconds: Double) {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        file = nil // closing the AVAudioFile finalizes the m4a
         let samples = lock.withLock { pcm }
         return (Self.wav(samples, sampleRate: 16_000), Double(samples.count) / 2 / 16_000)
+    }
+
+    static func aac(sampleRate: Double) -> [String: Any] {
+        [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: 1]
     }
 
     static func wav(_ pcm: Data, sampleRate: UInt32) -> Data {
