@@ -44,6 +44,7 @@ struct Dashboard: View {
     let actions: DashboardActions
     @State private var pane: Pane
     @AppStorage("zoom") private var zoom = 1.0
+    @StateObject private var command = CommandKeyWatcher()
     @State private var palette = false
     @State private var help = false
     @State private var searchRequest = 0
@@ -108,6 +109,8 @@ struct Dashboard: View {
                         Text(p.rawValue)
                         Spacer()
                         KeyChip("⌘\(String(p.key.character))")
+                            .opacity(command.held ? 1 : 0)
+                            .animation(.easeOut(duration: 0.12), value: command.held)
                     }
                     .padding(.horizontal, 10).padding(.vertical, 7)
                     .background(pane == p ? Mocha.surface0 : .clear, in: RoundedRectangle(cornerRadius: 8))
@@ -183,6 +186,29 @@ extension View {
     /// Point sizes match macOS text styles: caption 10, body 13, title3 15, title2 17, title 22, largeTitle 26.
     func zfont(_ size: CGFloat, _ weight: Font.Weight = .regular, design: Font.Design = .default) -> some View {
         modifier(ZoomedFont(size: size, weight: weight, design: design))
+    }
+}
+
+/// Tracks whether Command is held so shortcut hints can appear on demand.
+final class CommandKeyWatcher: ObservableObject {
+    @Published private(set) var held = false
+    private var keyMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
+
+    init() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.held = event.modifierFlags.contains(.command)
+            return event
+        }
+        // A Cmd+Tab away releases Command in another app, so this window never sees the key up.
+        resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.held = false
+        }
+    }
+
+    deinit {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
     }
 }
 
