@@ -3,8 +3,7 @@ import Foundation
 /// One meeting: mic and system audio recorded to separate files, transcribed per channel on stop.
 /// Keeping the channels apart (as Wispr does) means the mic is always "You" and only the call is diarized.
 final class Meeting {
-    static let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Screamr/Meetings", isDirectory: true)
+    static let root = Store.root.appendingPathComponent("Meetings", isDirectory: true)
 
     let dir: URL
     let title: String
@@ -31,10 +30,15 @@ final class Meeting {
         return systemError == nil && system.peak > 0.001
     }
 
-    func transcribe(includeSystem: Bool, apiKey: String) async throws -> URL {
-        async let micWords = Scribe.words(file: dir.appendingPathComponent("mic.m4a"), apiKey: apiKey)
-        async let systemWords = includeSystem ? Scribe.words(file: dir.appendingPathComponent("system.m4a"), apiKey: apiKey) : []
-        let md = Transcript.markdown(title: title, mic: try await micWords, system: try await systemWords)
+    /// Static so the dashboard can re-run it on a past recording whose transcription failed.
+    static func transcribe(dir: URL, title: String, includeSystem: Bool, apiKey: String, store: Store) async throws -> URL {
+        let terms = store.keyterms
+        async let micWords = Scribe.words(file: dir.appendingPathComponent("mic.m4a"), apiKey: apiKey, keyterms: terms)
+        async let systemWords = includeSystem ? Scribe.words(file: dir.appendingPathComponent("system.m4a"), apiKey: apiKey, keyterms: terms) : []
+        let rules = store.replacements
+        let md = Transcript.markdown(title: title, mic: try await micWords, system: try await systemWords) {
+            TextRules.apply($0, replacements: rules)
+        }
         let out = dir.appendingPathComponent("transcript.md")
         try md.write(to: out, atomically: true, encoding: .utf8)
         return out

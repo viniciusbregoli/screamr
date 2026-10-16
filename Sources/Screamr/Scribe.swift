@@ -19,9 +19,9 @@ enum Scribe {
     }
 
     /// Diarized, word-timestamped transcription of a recorded meeting channel.
-    static func words(file: URL, apiKey: String) async throws -> [Transcript.Word] {
+    static func words(file: URL, apiKey: String, keyterms: [String] = []) async throws -> [Transcript.Word] {
         let audio = try Data(contentsOf: file)
-        let fields = [("diarize", "true"), ("timestamps_granularity", "word")]
+        let fields = [("diarize", "true"), ("timestamps_granularity", "word")] + keyterms.map { ("keyterms", $0) }
         // ponytail: one synchronous request per channel; long meetings may need Scribe's webhook mode.
         let r = try await request(audio: audio, filename: file.lastPathComponent, mime: "audio/mp4", fields: fields, apiKey: apiKey, timeout: 900)
         return r.words ?? []

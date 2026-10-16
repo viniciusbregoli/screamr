@@ -42,13 +42,13 @@ enum Transcript {
     static func micName(_ i: Int, _ count: Int) -> String { count == 1 ? "You" : "Room \(i + 1)" }
     static func systemName(_ i: Int, _ count: Int) -> String { "Speaker \(i + 1)" }
 
-    static func markdown(title: String, mic: [Word], system: [Word]) -> String {
+    static func markdown(title: String, mic: [Word], system: [Word], fix: (String) -> String = { $0 }) -> String {
         let all = (segments(mic, name: micName) + segments(system, name: systemName)).sorted { $0.start < $1.start }
         var md = "# \(title)\n\n"
         if all.isEmpty { md += "_No speech detected._\n" }
         for s in all {
             let t = Int(s.start)
-            md += String(format: "**[%02d:%02d:%02d] %@:** %@\n\n", t / 3600, t / 60 % 60, t % 60, s.speaker, s.text)
+            md += String(format: "**[%02d:%02d:%02d] %@:** %@\n\n", t / 3600, t / 60 % 60, t % 60, s.speaker, fix(s.text))
         }
         return md
     }
