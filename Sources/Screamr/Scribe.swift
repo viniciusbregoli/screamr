@@ -10,7 +10,13 @@ enum Scribe {
     struct Response: Decodable {
         let text: String
         let words: [Transcript.Word]?
+        let language_code: String?
     }
+
+    /// Scribe takes one language or detects among ~99; the user speaks only English and Portuguese, mixed.
+    static let languages: Set = ["eng", "por"]
+    /// Portuguese tends to be misheard as one of these, especially in short takes.
+    private static let nearPortuguese: Set = ["spa", "glg", "cat", "ita", "fra", "ron"]
 
     static func transcribe(wav: Data, apiKey: String, keyterms: [String] = []) async throws -> String {
         let fields = keyterms.map { ("keyterms", $0) }
@@ -27,7 +33,21 @@ enum Scribe {
         return r.words ?? []
     }
 
+    /// Auto-detects so mixed English/Portuguese speech stays intact; if detection lands on another
+    /// language, transcribes again forced to the closer of the two.
+    // ponytail: the retry bills the audio twice; it only fires on a misdetection.
     private static func request(audio: Data, filename: String, mime: String, fields: [(String, String)], apiKey: String, timeout: TimeInterval) async throws -> Response {
+        let r = try await send(audio: audio, filename: filename, mime: mime, fields: fields, apiKey: apiKey, timeout: timeout)
+        guard !r.text.isEmpty, let forced = fallbackLanguage(detected: r.language_code) else { return r }
+        return try await send(audio: audio, filename: filename, mime: mime, fields: fields + [("language_code", forced)], apiKey: apiKey, timeout: timeout)
+    }
+
+    static func fallbackLanguage(detected: String?) -> String? {
+        guard let detected, !languages.contains(detected) else { return nil }
+        return nearPortuguese.contains(detected) ? "por" : "eng"
+    }
+
+    private static func send(audio: Data, filename: String, mime: String, fields: [(String, String)], apiKey: String, timeout: TimeInterval) async throws -> Response {
         let boundary = UUID().uuidString
         var body = Data()
         func field(_ name: String, _ value: String) {
