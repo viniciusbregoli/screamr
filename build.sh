@@ -1,5 +1,6 @@
 #!/bin/sh
-# Builds Screamr.app (menu bar only) into ./build.
+# Builds Screamr.app (menu bar only) into ./build. `./build.sh install` also copies it to
+# ~/Applications, where Raycast and Spotlight find it.
 set -e
 cd "$(dirname "$0")"
 swift build -c release
@@ -35,3 +36,11 @@ PLIST
 # Ad-hoc signature: macOS ties Accessibility/Mic grants to it, so a rebuild may need re-granting.
 codesign --force --sign - "$app"
 echo "Built $app"
+if [ "$1" = install ]; then
+  pkill -x Screamr || true
+  rm -rf ~/Applications/Screamr.app
+  mkdir -p ~/Applications
+  cp -R "$app" ~/Applications/
+  open ~/Applications/Screamr.app
+  echo "Installed ~/Applications/Screamr.app"
+fi

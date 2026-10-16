@@ -8,7 +8,7 @@ Voice dictation and meeting recording for macOS, transcribed by ElevenLabs Scrib
 
 ```sh
 mkdir -p ~/.config/screamr && printf '%s' "$ELEVEN_LABS_API_KEY" > ~/.config/screamr/api_key && chmod 600 ~/.config/screamr/api_key
-./build.sh && open build/Screamr.app
+./build.sh install   # builds, copies to ~/Applications (Raycast/Spotlight) and launches
 ```
 
 The key can also come from the `ELEVEN_LABS_API_KEY` environment variable. Requires macOS 14.4+.
