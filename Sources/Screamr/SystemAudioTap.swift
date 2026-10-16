@@ -80,7 +80,7 @@ final class SystemAudioTap {
     private func get<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ value: inout T, _ step: String) throws {
         var addr = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size = UInt32(MemoryLayout<T>.size)
-        try check(step, AudioObjectGetPropertyData(object, &addr, 0, nil, &size, &value))
+        try check(step, withUnsafeMutablePointer(to: &value) { AudioObjectGetPropertyData(object, &addr, 0, nil, &size, $0) })
     }
 
     private func check(_ step: String, _ status: OSStatus) throws {
