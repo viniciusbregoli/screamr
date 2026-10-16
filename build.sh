@@ -17,8 +17,9 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>Screamr</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.4</string>
   <key>LSUIElement</key><true/>
+  <key>NSAudioCaptureUsageDescription</key><string>Screamr records call audio during meeting recordings so the other participants appear in the transcript.</string>
   <key>NSMicrophoneUsageDescription</key><string>Screamr records your voice while you hold Fn and sends it to ElevenLabs for transcription.</string>
 </dict>
 </plist>
