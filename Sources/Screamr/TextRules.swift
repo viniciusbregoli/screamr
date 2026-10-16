@@ -26,4 +26,11 @@ enum TextRules {
         }
         return out
     }
+
+    /// Scribe keeps ? and ! but drops the final period on statements, so back-to-back takes run together.
+    /// Single words are left bare: they're usually names or search terms, not sentences.
+    static func endSentence(_ text: String) -> String {
+        guard let last = text.last, last.isLetter || last.isNumber, text.split(separator: " ").count > 1 else { return text }
+        return text + "."
+    }
 }
