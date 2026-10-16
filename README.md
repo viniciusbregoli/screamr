@@ -1,4 +1,4 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
+<img src="assets/AppIcon.png" width="96" height="96" alt="screamr icon">
 
 # screamr
 
@@ -23,6 +23,13 @@ First launch asks for **Accessibility** (hotkeys and pasting; relaunch after gra
 | Double-tap Fn, or Fn+Space | Hands-free dictation, Fn again to finish |
 | Esc | Cancel dictation |
 | Ctrl+Opt+Cmd+M | Start or stop a meeting recording |
+| Ctrl+Opt+Cmd+D | Open the dashboard (or open the app again) |
+
+## Dashboard
+
+Home (stats and dictation history), Meetings (transcripts, re-transcribe), Dictionary, Snippets and Settings, in Catppuccin Mocha. Inside it: Cmd+1 to Cmd+5 switch sections, Cmd+K opens the command palette, `/` searches history, `?` lists shortcuts, Cmd+N adds an entry, Cmd+Plus / Cmd+Minus / Cmd+0 zoom, Esc closes.
+
+Dictionary words are sent to Scribe as key terms. A replacement also rewrites what Scribe heard, which is how to fix names that sound like common words (Screamer to screamr). Snippets expand a spoken trigger phrase into text. Data lives in `~/Library/Application Support/Screamr/`.
 
 Meetings are saved to `~/Library/Application Support/Screamr/Meetings/<date>/` as `mic.m4a`, `system.m4a` and `transcript.md`. The mic channel is labeled "You" (or "Room N" when several people share the mic); call audio is diarized into "Speaker N". Use headphones on calls, otherwise the mic also picks up the other side.
 
