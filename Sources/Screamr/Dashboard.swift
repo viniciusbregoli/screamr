@@ -5,12 +5,13 @@ import ServiceManagement
 import SwiftUI
 
 enum Pane: String, CaseIterable, Identifiable {
-    case home = "Home", meetings = "Meetings", dictionary = "Dictionary", snippets = "Snippets", settings = "Settings"
+    case home = "Home", meetings = "Meetings", people = "People", dictionary = "Dictionary", snippets = "Snippets", settings = "Settings"
     var id: Self { self }
     var icon: String {
         switch self {
         case .home: "house"
         case .meetings: "person.2.wave.2"
+        case .people: "person.crop.circle"
         case .dictionary: "character.book.closed"
         case .snippets: "text.badge.plus"
         case .settings: "gearshape"
@@ -30,7 +31,7 @@ let shortcutList: [(keys: String, action: String)] = [
     ("Esc", "Cancel dictation"),
     ("⌃⌥⌘M", "Start or stop a meeting recording"),
     ("⌃⌥⌘D", "Open this dashboard"),
-    ("⌘1 to ⌘5", "Switch section"),
+    ("⌘1 to ⌘6", "Switch section"),
     ("⌘K", "Command palette"),
     ("/", "Search history"),
     ("⌘N", "Add a word or snippet"),
@@ -63,6 +64,7 @@ struct Dashboard: View {
                 switch pane {
                 case .home: HomePane(store: store, searchRequest: searchRequest)
                 case .meetings: MeetingsPane(store: store, actions: actions)
+                case .people: PeoplePane(store: store)
                 case .dictionary:
                     PairEditor(items: $store.dictionary, first: \.phrase, second: \.replacement, make: DictionaryEntry.init,
                                title: "Dictionary", firstLabel: "Word or name", secondLabel: "Replace with (optional)",
@@ -402,6 +404,124 @@ private struct MeetingsPane: View {
         }
         let body = md.split(separator: "\n", maxSplits: 1).dropFirst().joined() // the title is already in the list
         return (try? AttributedString(markdown: body, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(body)
+    }
+}
+
+// MARK: People
+
+private struct PeoplePane: View {
+    @ObservedObject var store: Store
+
+    /// Most frequent first, so the people worth naming are at the top.
+    private var sorted: [Person] {
+        store.people.sorted { ($0.meetings.count, $0.lastSeen) > ($1.meetings.count, $1.lastSeen) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PaneHeader(title: "People", blurb: "Recognized by voice across your meetings, entirely on this Mac. Name someone once and every transcript uses it.")
+            if store.people.isEmpty {
+                Text("People show up here after your next transcribed meeting.").foregroundStyle(Mocha.overlay0)
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(sorted) { p in
+                            PersonRow(person: p, others: sorted.filter { $0.id != p.id },
+                                      rename: { rename(p.id, to: $0) }, merge: { merge(p.id, into: $0) }, delete: { delete(p.id) })
+                        }
+                    }
+                }
+            }
+        }
+        .padding(28)
+    }
+
+    private func rename(_ id: UUID, to name: String) {
+        guard let i = store.people.firstIndex(where: { $0.id == id }), store.people[i].name != name else { return }
+        store.people[i].name = name
+        rerender(store.people[i].meetings)
+    }
+
+    private func merge(_ id: UUID, into target: UUID) {
+        guard let s = store.people.firstIndex(where: { $0.id == id }), let t = store.people.firstIndex(where: { $0.id == target }) else { return }
+        let source = store.people[s]
+        PeopleMatcher.merge(source, into: &store.people[t])
+        let meetings = store.people[t].meetings
+        store.people.remove(at: s)
+        rerender(meetings)
+    }
+
+    private func delete(_ id: UUID) {
+        guard let i = store.people.firstIndex(where: { $0.id == id }) else { return }
+        let meetings = store.people[i].meetings
+        store.people.remove(at: i)
+        rerender(meetings)
+    }
+
+    /// Transcripts are rebuilt from saved words, so renames apply to past meetings at no Scribe cost.
+    private func rerender(_ meetings: [String]) {
+        for m in store.meetings where meetings.contains(m.dir.lastPathComponent) {
+            _ = try? Meeting.render(dir: m.dir, title: m.title, store: store)
+        }
+    }
+}
+
+private struct PersonRow: View {
+    let person: Person
+    let others: [Person]
+    let rename: (String) -> Void
+    let merge: (UUID) -> Void
+    let delete: () -> Void
+    @State private var draft = ""
+    @FocusState private var editing: Bool
+    private static let colors = [Mocha.mauve, Mocha.blue, Mocha.green, Mocha.peach, Mocha.pink, Mocha.teal, Mocha.yellow, Mocha.lavender]
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(person.name.isEmpty ? "?" : String(person.name.prefix(1)).uppercased())
+                .zfont(15, .bold)
+                .frame(width: 36, height: 36)
+                .background(Self.colors[person.number % Self.colors.count], in: Circle())
+                .foregroundStyle(Mocha.crust)
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("", text: $draft, prompt: placeholder("\(person.displayName): who is this?"))
+                    .textFieldStyle(.plain)
+                    .zfont(13, .semibold)
+                    .focused($editing)
+                    .onSubmit { rename(draft.trimmingCharacters(in: .whitespaces)) }
+                    .onChange(of: editing) { _, now in if !now { rename(draft.trimmingCharacters(in: .whitespaces)) } }
+                HStack(spacing: 6) {
+                    Text("\(person.meetings.count) meeting\(person.meetings.count == 1 ? "" : "s")")
+                    Text("·")
+                    Text("last heard ") + Text(person.lastSeen, format: .relative(presentation: .named))
+                }
+                .zfont(10).foregroundStyle(Mocha.subtext0)
+                if !person.quote.isEmpty {
+                    Text("\u{201C}\(person.quote)\u{201D}").italic().zfont(10).foregroundStyle(Mocha.overlay0).lineLimit(2)
+                }
+            }
+            Spacer()
+            if person.name.isEmpty && person.meetings.count >= 2 {
+                Text("Appears often").zfont(10, .semibold)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Mocha.yellow.opacity(0.2), in: Capsule())
+                    .foregroundStyle(Mocha.yellow)
+            }
+            Menu("Merge into") {
+                ForEach(others) { o in Button(o.displayName) { merge(o.id) } }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(others.isEmpty)
+            .help("Same person split in two? Merge them.")
+            Button { delete() } label: { Image(systemName: "trash") }
+                .buttonStyle(.plain).foregroundStyle(Mocha.red).help("Forget this person")
+        }
+        .padding(12)
+        .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
+        .onAppear { draft = person.name }
+        .onChange(of: person.name) { _, name in if !editing { draft = name } }
     }
 }
 
