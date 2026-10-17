@@ -156,6 +156,13 @@ struct MeetingView: View {
     // Read in body so an open transcript redraws in the new theme's colors.
     @AppStorage(Theme.key) private var theme = "mocha"
     let meeting: MeetingFolder
+    @State private var renaming = false
+    @State private var draft = ""
+    @State private var renameError: String?
+
+    /// Read from the library, since `meeting` is the value this screen opened with: a rename here or one
+    /// synced from another device only shows up in the refreshed list.
+    private var title: String { library.meetings.first { $0.dir == meeting.dir }?.title ?? meeting.title }
 
     // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
     private static var colors: [Color] { [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender] }
@@ -181,13 +188,29 @@ struct MeetingView: View {
         }
         .background(Theme.base)
         .overlay { if segments.isEmpty { status } }
-        .navigationTitle(meeting.title)
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            Button("Rename", systemImage: "pencil") {
+                draft = library.meetings.first { $0.dir == meeting.dir }?.name ?? ""
+                renaming = true
+            }
             if meeting.isTranscribed {
                 ShareLink(item: meeting.transcript)
             }
         }
+        .alert("Rename meeting", isPresented: $renaming) {
+            TextField("Title", text: $draft)
+            Button("Save") {
+                Task {
+                    do { try await library.rename(meeting, to: draft) } catch { renameError = error.localizedDescription }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Leave it empty to show the date again.")
+        }
+        .alert("Couldn't rename", isPresented: .constant(renameError != nil)) { Button("OK") { renameError = nil } } message: { Text(renameError ?? "") }
     }
 
     @ViewBuilder private var status: some View {

@@ -18,9 +18,18 @@ struct MeetingFolder: Identifiable, Hashable {
     }()
 
     let dir: URL
+    /// Read once, so a rename changes the value and the list redraws.
+    let name: String?
     var id: URL { dir }
     var date: Date { Self.stamp.date(from: dir.lastPathComponent) ?? Self.minuteStamp.date(from: dir.lastPathComponent) ?? .distantPast }
-    var title: String { date.formatted(date: .abbreviated, time: .shortened) }
+    var title: String { name ?? date.formatted(date: .abbreviated, time: .shortened) }
+    /// The transcript heading: the title as given, or "Meeting <date>" like the Mac when there is none.
+    var heading: String { name ?? "Meeting \(date.formatted(date: .abbreviated, time: .shortened))" }
+
+    init(dir: URL) {
+        self.dir = dir
+        name = MeetingTitle.read(dir)
+    }
     var audio: URL { dir.appendingPathComponent("mic.m4a") }
     var wordsFile: URL { dir.appendingPathComponent("mic.words.json") }
     var transcript: URL { dir.appendingPathComponent("transcript.md") }
@@ -74,6 +83,15 @@ struct MeetingFolder: Identifiable, Hashable {
         return MeetingFolder(dir: dir)
     }
 
+    /// An empty title clears it, so the list goes back to the recording date. Throws when the title can't be
+    /// saved, so the screen never shows a name that isn't on disk.
+    func rename(_ meeting: MeetingFolder, to title: String) async throws {
+        try MeetingTitle.write(title, to: meeting.dir)
+        try MeetingTitle.retitle(transcript: meeting.transcript, heading: MeetingFolder(dir: meeting.dir).heading)
+        refresh()
+        await syncNow()
+    }
+
     func delete(_ meeting: MeetingFolder) {
         try? FileManager.default.removeItem(at: meeting.dir)
         refresh()
@@ -121,7 +139,7 @@ struct MeetingFolder: Identifiable, Hashable {
             try JSONEncoder().encode(words).write(to: meeting.wordsFile)
             try Scribe.Meta(verbatim: verbatim, languages: channel.language.map { ["mic": $0] } ?? [:]).write(to: meeting.dir)
             // Passed as the call channel so the Markdown labels match the in-app "Speaker N".
-            let md = Transcript.markdown(title: "Meeting \(meeting.title)", mic: [], system: words)
+            let md = Transcript.markdown(title: MeetingFolder(dir: meeting.dir).heading, mic: [], system: words)
             try md.write(to: meeting.transcript, atomically: true, encoding: .utf8)
         } catch {
             errors[meeting.dir] = error.localizedDescription

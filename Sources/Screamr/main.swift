@@ -227,10 +227,15 @@ final class App: NSObject, NSApplicationDelegate {
             defer { syncing = false }
             do {
                 var recognized = false
-                for (dir, files) in try await syncEngine.run(config, skip: skip) where files.contains(where: { $0.hasSuffix(".words.json") }) {
-                    await Meeting.identifySpeakers(dir: dir, store: store)
+                for (dir, files) in try await syncEngine.run(config, skip: skip) {
+                    if files.contains(where: { $0.hasSuffix(".words.json") }) {
+                        await Meeting.identifySpeakers(dir: dir, store: store)
+                        recognized = true
+                    } else if !files.contains(MeetingTitle.file) {
+                        continue
+                    }
+                    // A renamed meeting only needs its transcript heading rewritten.
                     _ = try? Meeting.render(dir: dir, title: "Meeting \(dir.lastPathComponent)", store: store)
-                    recognized = true
                 }
                 if recognized { _ = try await syncEngine.run(config, skip: skip) }
                 store.refreshMeetings()

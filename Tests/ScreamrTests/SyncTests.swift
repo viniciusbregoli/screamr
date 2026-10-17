@@ -61,3 +61,18 @@ private func all(_: String) -> Bool { true }
     let next = SyncEngine.merge(base: r.merged, local: [:], remote: r.merged, wants: all)
     #expect(next.merged == r.merged && next.download.isEmpty && next.delete.isEmpty)
 }
+
+@Test func aTitleSetOnTheServerReachesEveryDeviceIncludingTheIPhone() {
+    let noAudio: (String) -> Bool = { !$0.hasSuffix(".m4a") }
+    let base = ["mic.m4a": "a1", "title.txt": "old"]
+    let remote = ["mic.m4a": "a1", "title.txt": "new"]
+    let r = SyncEngine.merge(base: base, local: ["title.txt": "old"], remote: remote, wants: noAudio)
+    #expect(r.download == ["title.txt"])
+    #expect(r.merged == remote)
+}
+
+@Test func aTitleRenamedOnThisDeviceIsPushed() {
+    let r = SyncEngine.merge(base: ["title.txt": "old"], local: ["title.txt": "mine"], remote: ["title.txt": "old"], wants: all)
+    #expect(r.merged == ["title.txt": "mine"])
+    #expect(r.download.isEmpty)
+}
