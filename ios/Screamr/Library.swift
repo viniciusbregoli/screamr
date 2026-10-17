@@ -115,8 +115,11 @@ struct MeetingFolder: Identifiable, Hashable {
             UIApplication.shared.isIdleTimerDisabled = !transcribing.isEmpty
         }
         do {
-            let words = try await Scribe.words(file: meeting.audio, apiKey: key)
+            let verbatim = Scribe.meetingVerbatim
+            let channel = try await Scribe.words(file: meeting.audio, apiKey: key, verbatim: verbatim)
+            let words = channel.words
             try JSONEncoder().encode(words).write(to: meeting.wordsFile)
+            try Scribe.Meta(verbatim: verbatim, languages: channel.language.map { ["mic": $0] } ?? [:]).write(to: meeting.dir)
             // Passed as the call channel so the Markdown labels match the in-app "Speaker N".
             let md = Transcript.markdown(title: "Meeting \(meeting.title)", mic: [], system: words)
             try md.write(to: meeting.transcript, atomically: true, encoding: .utf8)

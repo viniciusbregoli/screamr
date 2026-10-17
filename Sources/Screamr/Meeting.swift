@@ -36,11 +36,17 @@ final class Meeting {
     @MainActor
     static func transcribe(dir: URL, title: String, includeSystem: Bool, apiKey: String, store: Store) async throws -> URL {
         let terms = store.keyterms
-        async let micWords = Scribe.words(file: dir.appendingPathComponent("mic.m4a"), apiKey: apiKey, keyterms: terms)
-        async let systemWords = includeSystem ? Scribe.words(file: dir.appendingPathComponent("system.m4a"), apiKey: apiKey, keyterms: terms) : []
+        let verbatim = Scribe.meetingVerbatim
+        async let mic = Scribe.words(file: dir.appendingPathComponent("mic.m4a"), apiKey: apiKey, keyterms: terms, verbatim: verbatim)
+        async let system = includeSystem
+            ? Scribe.words(file: dir.appendingPathComponent("system.m4a"), apiKey: apiKey, keyterms: terms, verbatim: verbatim)
+            : Scribe.Channel(words: [], language: nil)
+        let (micChannel, systemChannel) = try await (mic, system)
         // Raw words are kept so transcripts can be re-rendered with new names without paying Scribe again.
-        try saveWords(try await micWords, dir, "mic")
-        try saveWords(try await systemWords, dir, "system")
+        try saveWords(micChannel.words, dir, "mic")
+        try saveWords(systemChannel.words, dir, "system")
+        let languages = ["mic": micChannel.language, "system": systemChannel.language].compactMapValues { $0 }
+        try Scribe.Meta(verbatim: verbatim, languages: languages).write(to: dir)
         await identifySpeakers(dir: dir, store: store)
         return try render(dir: dir, title: title, store: store)
     }
