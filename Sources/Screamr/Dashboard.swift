@@ -23,6 +23,8 @@ enum Pane: String, CaseIterable, Identifiable {
 struct DashboardActions {
     let toggleMeeting: () -> Void
     let retranscribe: (MeetingInfo) -> Void
+    var syncNow: () -> Void = {}
+    var meetingDeleted: (MeetingInfo) -> Void = { _ in }
 }
 
 let shortcutList: [(keys: String, action: String)] = [
@@ -73,7 +75,7 @@ struct Dashboard: View {
                     PairEditor(items: $store.snippets, first: \.trigger, second: \.expansion, make: Snippet.init,
                                title: "Snippets", firstLabel: "When I say", secondLabel: "Insert",
                                blurb: "Say the trigger phrase and screamr types the expansion. Saying only the trigger inserts the expansion on its own.")
-                case .settings: SettingsPane()
+                case .settings: SettingsPane(store: store, actions: actions)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -380,6 +382,7 @@ private struct MeetingsPane: View {
                             Spacer()
                             Button("Move to Trash", role: .destructive) {
                                 try? FileManager.default.trashItem(at: m.dir, resultingItemURL: nil)
+                                actions.meetingDeleted(m)
                                 selection = nil
                                 store.refreshMeetings()
                             }
@@ -581,6 +584,11 @@ private struct PairEditor<Item: Identifiable & Hashable>: View {
 // MARK: Settings
 
 private struct SettingsPane: View {
+    @ObservedObject var store: Store
+    let actions: DashboardActions
+    @State private var syncURL = Store.syncConfig()?.url.absoluteString ?? ""
+    @State private var syncToken = ""
+    @State private var syncError: String?
     @State private var key = ""
     @State private var keyStatus = Store.apiKey() == nil ? "No key saved" : "Key saved"
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -613,6 +621,19 @@ private struct SettingsPane: View {
                                granted: mic == .authorized ? true : mic == .notDetermined ? nil : false, pane: "Privacy_Microphone",
                                request: mic == .notDetermined ? { AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { refresh += 1 } } } : nil)
                     permission("System Audio Recording", detail: "Call audio in meetings, asked on your first recording", granted: nil, pane: "Privacy_AudioCapture")
+                }
+                group("Sync") {
+                    HStack {
+                        TextField("", text: $syncURL, prompt: placeholder("https://server.tailnet.ts.net:8796")).textFieldStyle(.plain)
+                            .padding(8).background(Mocha.surface0, in: RoundedRectangle(cornerRadius: 6))
+                        SecureField("", text: $syncToken, prompt: placeholder(Store.syncConfig() == nil ? "Token" : "Token saved")).textFieldStyle(.plain)
+                            .padding(8).background(Mocha.surface0, in: RoundedRectangle(cornerRadius: 6))
+                            .onSubmit(saveSync)
+                        Button("Save", action: saveSync).disabled(syncURL.isEmpty)
+                        Button("Sync now", action: actions.syncNow).disabled(Store.syncConfig() == nil)
+                    }
+                    Text(syncError ?? (store.syncStatus.isEmpty ? "Meetings sync with the iPhone app through your sync server." : store.syncStatus))
+                        .zfont(10).foregroundStyle(syncError == nil ? Mocha.subtext0 : Mocha.red)
                 }
                 group("Microphone") {
                     let _ = refresh
@@ -671,6 +692,23 @@ private struct SettingsPane: View {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!)
                 }
             }
+        }
+    }
+
+    private func saveSync() {
+        guard let url = URL(string: syncURL.trimmingCharacters(in: .whitespaces)), url.scheme != nil else {
+            syncError = "Enter the server URL, including https://"
+            return
+        }
+        let token = syncToken.isEmpty ? Store.syncConfig()?.token ?? "" : syncToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { syncError = "Enter the token"; return }
+        do {
+            try Store.saveSyncConfig(.init(url: url, token: token))
+            syncToken = ""
+            syncError = nil
+            actions.syncNow()
+        } catch {
+            syncError = "Could not save: \(error.localizedDescription)"
         }
     }
 

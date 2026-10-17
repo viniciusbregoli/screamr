@@ -20,6 +20,7 @@ struct ScreamrApp: App {
 struct HomeView: View {
     @Environment(Library.self) private var library
     @Environment(MeetingRecorder.self) private var recorder
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
     @State private var error: String?
 
@@ -35,6 +36,7 @@ struct HomeView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Mocha.base)
+            .refreshable { await sync() }
             .overlay {
                 if library.meetings.isEmpty {
                     ContentUnavailableView("No meetings yet", systemImage: "waveform",
@@ -52,6 +54,12 @@ struct HomeView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
         .alert("screamr", isPresented: .constant(error != nil)) { Button("OK") { error = nil } } message: { Text(error ?? "") }
         .onAppear { if Keychain.apiKey == nil { showSettings = true } }
+        // iOS doesn't let the app sync in the background, so it catches up whenever it's opened.
+        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await sync() } } }
+    }
+
+    private func sync() async {
+        await library.syncNow(skip: Set([recorder.folder?.dir.lastPathComponent].compactMap { $0 }))
     }
 
     private var recordBar: some View {
@@ -176,6 +184,9 @@ struct MeetingView: View {
             ProgressView("Transcribing").tint(Mocha.mauve)
         } else if meeting.isTranscribed {
             ContentUnavailableView("No speech detected", systemImage: "waveform.slash")
+        } else if !meeting.hasAudio {
+            ContentUnavailableView("Transcript not synced yet", systemImage: "arrow.triangle.2.circlepath",
+                                   description: Text("This meeting was recorded on the Mac. Its transcript arrives once the Mac transcribes it."))
         } else {
             ContentUnavailableView {
                 Label(library.errors[meeting.dir] == nil ? "Not transcribed" : "Transcription failed", systemImage: "waveform")
@@ -196,7 +207,10 @@ struct MeetingView: View {
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(Library.self) private var library
     @State private var key = Keychain.apiKey ?? ""
+    @State private var syncURL = UserDefaults.standard.string(forKey: "syncURL") ?? ""
+    @State private var syncToken = Keychain.syncToken ?? ""
 
     var body: some View {
         NavigationStack {
@@ -212,6 +226,21 @@ struct SettingsView: View {
                     Text("Stored in the iOS Keychain. Scribe bills about 18 credits per minute of recording.")
                 }
                 .listRowBackground(Mocha.surface0)
+                Section {
+                    TextField("Server URL", text: $syncURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    SecureField("Token", text: $syncToken)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit(save)
+                } header: {
+                    Text("Sync")
+                } footer: {
+                    Text(library.syncStatus.isEmpty ? "Meetings sync with the Mac through your sync server, over Tailscale." : library.syncStatus)
+                }
+                .listRowBackground(Mocha.surface0)
             }
             .scrollContentBackground(.hidden)
             .background(Mocha.base)
@@ -223,6 +252,9 @@ struct SettingsView: View {
 
     private func save() {
         Keychain.apiKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(syncURL.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "syncURL")
+        Keychain.syncToken = syncToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { await library.syncNow() }
         dismiss()
     }
 }

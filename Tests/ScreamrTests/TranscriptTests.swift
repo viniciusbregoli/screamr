@@ -41,3 +41,12 @@ private func w(_ text: String, _ start: Double, _ speaker: String = "speaker_0")
 @Test func emptyMeetingSaysSo() {
     #expect(Transcript.markdown(title: "T", mic: [], system: []).contains("No speech detected"))
 }
+
+@Test func labelsCoverEverySpeakerWithNamesFirst() {
+    let w = { (id: String) in Transcript.Word(text: "hi", start: 0, end: 1, type: "word", speaker_id: id) }
+    let labels = Transcript.labels(mic: [w("speaker_0"), w("speaker_1")], system: [w("speaker_0")], names: ["mic:speaker_1": "Ana"])
+    #expect(labels == ["mic:speaker_0": "Room 1", "mic:speaker_1": "Ana", "system:speaker_0": "Speaker 1"])
+    // The iPhone has no "You" channel, so its mic speakers are plain numbered speakers.
+    let phone = Transcript.labels(mic: [w("speaker_0")], system: [], micName: Transcript.systemName)
+    #expect(phone == ["mic:speaker_0": "Speaker 1"])
+}

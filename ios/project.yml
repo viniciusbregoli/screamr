@@ -15,8 +15,9 @@ targets:
     platform: iOS
     sources:
       - Screamr
-      # Shared with the Mac app: Scribe client, transcript rendering and the Mocha palette.
+      # Shared with the Mac app: Scribe client, sync engine, transcript rendering and the Mocha palette.
       - path: ../Sources/Screamr/Scribe.swift
+      - path: ../Sources/Screamr/Sync.swift
       - path: ../Sources/Screamr/Transcript.swift
       - path: ../Sources/Screamr/Theme.swift
     settings:
