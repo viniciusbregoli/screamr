@@ -18,9 +18,16 @@ struct MeetingFolder: Identifiable, Hashable {
     }()
 
     let dir: URL
+    /// Read once, so a rename changes the value and the list redraws.
+    let name: String?
     var id: URL { dir }
     var date: Date { Self.stamp.date(from: dir.lastPathComponent) ?? Self.minuteStamp.date(from: dir.lastPathComponent) ?? .distantPast }
-    var title: String { date.formatted(date: .abbreviated, time: .shortened) }
+    var title: String { name ?? date.formatted(date: .abbreviated, time: .shortened) }
+
+    init(dir: URL) {
+        self.dir = dir
+        name = MeetingTitle.read(dir)
+    }
     var audio: URL { dir.appendingPathComponent("mic.m4a") }
     var wordsFile: URL { dir.appendingPathComponent("mic.words.json") }
     var transcript: URL { dir.appendingPathComponent("transcript.md") }
@@ -72,6 +79,16 @@ struct MeetingFolder: Identifiable, Hashable {
         let dir = Self.root.appendingPathComponent(MeetingFolder.stamp.string(from: Date()), isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return MeetingFolder(dir: dir)
+    }
+
+    /// An empty title clears it, so the list goes back to the recording date.
+    func rename(_ meeting: MeetingFolder, to title: String) async {
+        do { try MeetingTitle.write(title, to: meeting.dir) } catch {
+            errors[meeting.dir] = error.localizedDescription
+            return
+        }
+        refresh()
+        await syncNow()
     }
 
     func delete(_ meeting: MeetingFolder) {

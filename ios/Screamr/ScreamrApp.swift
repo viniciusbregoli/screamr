@@ -156,6 +156,10 @@ struct MeetingView: View {
     // Read in body so an open transcript redraws in the new theme's colors.
     @AppStorage(Theme.key) private var theme = "mocha"
     let meeting: MeetingFolder
+    @State private var renaming = false
+    @State private var draft = ""
+    /// The title after a rename here, since `meeting` is the value this screen was opened with.
+    @State private var renamed: String?
 
     // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
     private static var colors: [Color] { [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender] }
@@ -181,12 +185,27 @@ struct MeetingView: View {
         }
         .background(Theme.base)
         .overlay { if segments.isEmpty { status } }
-        .navigationTitle(meeting.title)
+        .navigationTitle(renamed ?? meeting.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            Button("Rename", systemImage: "pencil") {
+                draft = renamed ?? meeting.name ?? ""
+                renaming = true
+            }
             if meeting.isTranscribed {
                 ShareLink(item: meeting.transcript)
             }
+        }
+        .alert("Rename meeting", isPresented: $renaming) {
+            TextField("Title", text: $draft)
+            Button("Save") {
+                let title = MeetingTitle.clean(draft)
+                renamed = title.isEmpty ? meeting.date.formatted(date: .abbreviated, time: .shortened) : title
+                Task { await library.rename(meeting, to: title) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Leave it empty to show the date again.")
         }
     }
 
