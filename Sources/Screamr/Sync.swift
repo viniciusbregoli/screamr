@@ -62,9 +62,9 @@ actor SyncEngine {
     /// Returns each meeting folder that received files, with the names of those files.
     func run(_ config: Config, skip: Set<String> = []) async throws -> [(dir: URL, files: [String])] {
         var state = load()
-        var components = URLComponents(url: config.url.appendingPathComponent("changes"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "since", value: String(state.cursor))]
-        let changes = try JSONDecoder().decode(Changes.self, from: try await send(config, request(config, "GET", components.url!)))
+        var changes = try await changes(config, since: state.cursor)
+        // A server restored from backup is behind this device; re-read everything; merging is idempotent.
+        if changes.cursor < state.cursor { changes = try await self.changes(config, since: 0) }
 
         var remote: [String: Manifest] = [:]
         var deletedRemotely: Set<String> = []
@@ -115,6 +115,12 @@ actor SyncEngine {
         state.cursor = changes.cursor
         save(state)
         return received
+    }
+
+    private func changes(_ config: Config, since cursor: Int) async throws -> Changes {
+        var components = URLComponents(url: config.url.appendingPathComponent("changes"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "since", value: String(cursor))]
+        return try JSONDecoder().decode(Changes.self, from: try await send(config, request(config, "GET", components.url!)))
     }
 
     /// Three-way merge of one meeting's files. A file changed or added here wins and gets pushed;
