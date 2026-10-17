@@ -158,8 +158,11 @@ struct MeetingView: View {
     let meeting: MeetingFolder
     @State private var renaming = false
     @State private var draft = ""
-    /// The title after a rename here, since `meeting` is the value this screen was opened with.
-    @State private var renamed: String?
+    @State private var renameError: String?
+
+    /// Read from the library, since `meeting` is the value this screen opened with: a rename here or one
+    /// synced from another device only shows up in the refreshed list.
+    private var title: String { library.meetings.first { $0.dir == meeting.dir }?.title ?? meeting.title }
 
     // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
     private static var colors: [Color] { [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender] }
@@ -185,11 +188,11 @@ struct MeetingView: View {
         }
         .background(Theme.base)
         .overlay { if segments.isEmpty { status } }
-        .navigationTitle(renamed ?? meeting.title)
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Button("Rename", systemImage: "pencil") {
-                draft = renamed ?? meeting.name ?? ""
+                draft = library.meetings.first { $0.dir == meeting.dir }?.name ?? ""
                 renaming = true
             }
             if meeting.isTranscribed {
@@ -199,14 +202,15 @@ struct MeetingView: View {
         .alert("Rename meeting", isPresented: $renaming) {
             TextField("Title", text: $draft)
             Button("Save") {
-                let title = MeetingTitle.clean(draft)
-                renamed = title.isEmpty ? meeting.date.formatted(date: .abbreviated, time: .shortened) : title
-                Task { await library.rename(meeting, to: title) }
+                Task {
+                    do { try await library.rename(meeting, to: draft) } catch { renameError = error.localizedDescription }
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Leave it empty to show the date again.")
         }
+        .alert("Couldn't rename", isPresented: .constant(renameError != nil)) { Button("OK") { renameError = nil } } message: { Text(renameError ?? "") }
     }
 
     @ViewBuilder private var status: some View {

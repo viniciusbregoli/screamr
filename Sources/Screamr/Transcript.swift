@@ -120,4 +120,12 @@ enum MeetingTitle {
     static func write(_ title: String, to dir: URL) throws {
         try clean(title).write(to: dir.appendingPathComponent(file), atomically: true, encoding: .utf8)
     }
+
+    /// Swaps an existing transcript's "# heading" line. Only the heading: on the iPhone the transcript may
+    /// come from the Mac, with names and both channels this device can't render again.
+    static func retitle(transcript url: URL, heading: String) throws {
+        guard let md = try? String(contentsOf: url, encoding: .utf8), md.hasPrefix("# ") else { return }
+        let rest = md.firstIndex(of: "\n").map { md[$0...] } ?? ""
+        try ("# \(heading)" + rest).write(to: url, atomically: true, encoding: .utf8)
+    }
 }

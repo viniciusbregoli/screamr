@@ -20,3 +20,11 @@ import Testing
     #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent(MeetingTitle.file).path))
     #expect(MeetingTitle.read(dir) == nil)
 }
+
+@Test func renamingSwapsOnlyTheTranscriptHeading() throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).md")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try "# Meeting 16 Oct\n\n**[00:00:01] Marina:** oi\n".write(to: url, atomically: true, encoding: .utf8)
+    try MeetingTitle.retitle(transcript: url, heading: "Retro")
+    #expect(try String(contentsOf: url, encoding: .utf8) == "# Retro\n\n**[00:00:01] Marina:** oi\n")
+}
