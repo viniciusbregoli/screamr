@@ -28,4 +28,5 @@ import Testing
     #expect(json.contains("\"model_id\" : \"scribe_v2\""))
     #expect(json.contains("\"transcribed_at\" : \"1970-01-01T00:00:00Z\""))
     #expect(json.contains("\"mic\" : \"por\""))
+    #expect(json.contains("\"source\" : \"mac\""))
 }

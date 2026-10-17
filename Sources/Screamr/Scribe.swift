@@ -34,6 +34,8 @@ enum Scribe {
     struct Meta: Codable, Equatable {
         var transcription_mode: String
         var model_id: String
+        /// "mac" or "iphone": on the Mac the mic channel is the user, on the iPhone everyone shares it.
+        var source: String
         var transcribed_at: Date
         /// Channel ("mic", "system") to Scribe's language code, e.g. "por".
         var languages: [String: String]
@@ -41,6 +43,11 @@ enum Scribe {
         init(verbatim: Bool, languages: [String: String], at date: Date = Date()) {
             transcription_mode = verbatim ? "verbatim" : "clean"
             model_id = Scribe.model
+            #if os(iOS)
+            source = "iphone"
+            #else
+            source = "mac"
+            #endif
             transcribed_at = date
             self.languages = languages
         }
