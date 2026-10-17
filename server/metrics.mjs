@@ -64,13 +64,18 @@ function repeats(tokens) {
  * mic / system: Scribe word lists. meta: the meeting's meta.json, or null for meetings transcribed before it existed.
  * The user's turns are the mic channel's dominant speaker; `mic_speakers` > 1 flags meetings where that's a guess.
  */
-export function computeMetrics({ mic = [], system = [], meta = null, lexicon }) {
+/** The user's turns: the mic channel's dominant speaker, by speech time. */
+export function myTurns(mic) {
   const micTurns = turns(mic)
   const bySpeaker = new Map()
   for (const t of micTurns) bySpeaker.set(t.speaker, (bySpeaker.get(t.speaker) ?? 0) + (t.end - t.start))
   const me = [...bySpeaker.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
-  const mine = micTurns.filter((t) => t.speaker === me)
-  const others = [...micTurns.filter((t) => t.speaker !== me), ...turns(system)]
+  return { mine: micTurns.filter((t) => t.speaker === me), rest: micTurns.filter((t) => t.speaker !== me), speakers: bySpeaker.size }
+}
+
+export function computeMetrics({ mic = [], system = [], meta = null, lexicon }) {
+  const { mine, rest, speakers } = myTurns(mic)
+  const others = [...rest, ...turns(system)]
 
   const words = mine.flatMap((t) => t.words)
   const tokens = words.map((w) => normalize(w.text)).filter(Boolean)
@@ -99,7 +104,7 @@ export function computeMetrics({ mic = [], system = [], meta = null, lexicon }) 
     source: meta?.source ?? 'unknown',
     model_id: meta?.model_id ?? null,
     language: meta?.languages?.mic ?? null,
-    mic_speakers: bySpeaker.size,
+    mic_speakers: speakers,
     // Baseline data: Mac meetings, transcribed verbatim, with speech from the user.
     eligible: meta?.source === 'mac' && verbatim && wordCount > 0,
     my_words: wordCount,

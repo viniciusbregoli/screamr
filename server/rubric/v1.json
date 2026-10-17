@@ -1,0 +1,51 @@
+{
+  "version": "rubric-v1",
+  "provisional": true,
+  "notes": "Tested on 2026-10-16 with 24 synthetic pt/en meeting sentences (jev-rubric-v1-test.mjs in the PDI session). Criteria come from standard definitions until they are rewritten from Vinicius's reading notes (step 4); a change in meaning means a new version and a re-run of the whole history.",
+  "model": "jev-1.13.0",
+  "setting": "Spoken turn by one person in a work meeting of a software and machine learning team, transcribed from audio.",
+  "long_turn_words": 40,
+  "questions": {
+    "style": {
+      "type": "choice",
+      "source": "Passive/assertive/aggressive model from the assertiveness literature (standard definitions, provisional).",
+      "instructions": "How does the speaker communicate their own position in `turn`, a single spoken turn from a work meeting?",
+      "criteria": {
+        "passive": "The speaker gives up or hides a position they hold: defers to others without stating a view, over-apologizes, belittles their own idea, or agrees while signalling they disagree, or makes a proposal so tentatively (fillers, approval-seeking tag questions like \"right?\" or \"né?\") that it is easy to ignore.",
+        "assertive": "The speaker states their position, disagreement, need, hypothesis or decision clearly and owns it, while respecting the other people.",
+        "aggressive": "The speaker imposes their position by dismissing, blaming, belittling or attacking other people or their work, or orders with no room for discussion.",
+        "not_applicable": "No position is communicated: greetings, small talk, a pure question, or neutral reporting of a fact."
+      }
+    },
+    "hedge_function": {
+      "type": "choice",
+      "source": "Hedging as calibration versus softening (standard definitions, provisional).",
+      "instructions": "What role do hedging words or qualifiers (such as 'I think', 'maybe', 'kind of', 'acho', 'talvez', 'meio que') play in `turn`?",
+      "criteria": {
+        "genuine_uncertainty": "They mark real uncertainty about something the speaker cannot confirm yet, such as a hypothesis about a cause, and the rest of the message stays clear.",
+        "softening_hedge": "They weaken an opinion, request or proposal the speaker actually holds, making it sound less certain or less important than it is.",
+        "none": "The turn has no hedging words or qualifiers."
+      }
+    },
+    "commitment": {
+      "type": "choice",
+      "source": "Concrete commitments: owner, deliverable, date (standard definitions, provisional).",
+      "instructions": "Does the speaker commit to doing something in `turn`?",
+      "criteria": {
+        "concrete": "The speaker commits to a specific deliverable with a clear owner and a date or deadline.",
+        "vague": "The speaker promises or suggests future action without a specific deliverable, owner or date.",
+        "none": "The speaker makes no commitment to future action."
+      }
+    },
+    "could_be_better": {
+      "type": "noul",
+      "source": "Concrete weakening patterns (rubric v1 test, provisional).",
+      "instructions": "Does `turn` contain wording that weakens it without adding information: filler words, apologies, hedges on something the speaker actually believes, approval-seeking tag questions, attacks on people, or a vague promise where a concrete one was possible? Greetings, plain questions, direct statements and honest uncertainty about unconfirmed facts do not count."
+    },
+    "point_first": {
+      "type": "noul",
+      "source": "BLUF, bottom line up front (standard definition, provisional, not in the 2026-10-16 test). Asked only for turns over long_turn_words words.",
+      "instructions": "Does the first sentence of `turn` state the speaker's main point, request or decision, rather than building up to it later?"
+    }
+  }
+}
