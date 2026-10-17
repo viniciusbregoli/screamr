@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, rmSync, utimesSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { cleanTitle, meetingDate, parseManifest, RETIRED, start, TITLE } from './server.mjs'
 
 test('records keep the latest edit, blobs are checked against their hash', async () => {
@@ -196,4 +196,26 @@ test('titles are one line, trimmed and at most 120 characters', () => {
   assert.equal(cleanTitle('  a\r\nb  '), 'a b')
   assert.equal(cleanTitle('é'.repeat(120)), 'é'.repeat(120))
   assert.equal(cleanTitle('é'.repeat(121)), null)
+})
+
+test('a manifest value that is not a hash never reads a file outside the blob directory', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'screamr-sync-'))
+  writeFileSync(join(dir, 'secret.txt'), 'secret')
+  const s = await start({ dataDir: dir, token: 't' })
+  const base = `http://127.0.0.1:${s.port}`
+  const auth = { authorization: 'Bearer t' }
+  try {
+    const words = Buffer.from(JSON.stringify([{ text: 'oi', type: 'word', speaker_id: 'speaker_0', start: 0, end: 0.5 }]))
+    const hash = createHash('sha256').update(words).digest('hex')
+    await fetch(`${base}/blobs/${hash}`, { method: 'PUT', headers: auth, body: words })
+    // Resolves to <dataDir>/secret.txt through blobs/<first two chars>/<value>.
+    const escape = `../${basename(dir)}/secret.txt`
+    const body = JSON.stringify({ 'mic.words.json': hash, [TITLE]: escape })
+    await fetch(`${base}/records`, { method: 'POST', headers: auth, body: JSON.stringify([{ kind: 'meeting', id: 'm', body, updated: 1 }]) })
+    const { metrics } = await fetch(`${base}/metrics`, { headers: auth }).then((r) => r.json())
+    assert.equal(metrics.find((m) => m.meeting === 'm').title, null)
+  } finally {
+    await s.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

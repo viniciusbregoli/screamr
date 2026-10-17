@@ -124,9 +124,8 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
   // What Jev's answers depend on: the words, and which of them are the user's.
   const wordsKey = (manifest) => ['mic.words.json', 'system.words.json', 'me.json'].map((f) => manifest[f] ?? '').join(':')
   const readBlob = (manifest, name) => {
-    const hash = manifest[name]
-    if (!hash || !existsSync(blobPath(hash))) return undefined
-    return JSON.parse(readFileSync(blobPath(hash), 'utf8'))
+    const path = storedBlob(manifest[name])
+    return path ? JSON.parse(readFileSync(path, 'utf8')) : undefined
   }
   const updateMetrics = (id) => {
     try {
@@ -180,11 +179,12 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
     req.on('error', reject)
   })
   const blobPath = (hash) => join(blobs, hash.slice(0, 2), hash)
+  // Manifest values come from clients: anything but a SHA-256 could point outside the blob directory.
+  const storedBlob = (hash) => (typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash) && existsSync(blobPath(hash)) ? blobPath(hash) : null)
   const titleOf = (id) => {
     const record = meetingRecord.get(id)
-    const hash = record && !record.deleted ? parseManifest(record.body)?.[TITLE] : null
-    if (!hash || hash === RETIRED || !existsSync(blobPath(hash))) return null
-    return cleanTitle(readFileSync(blobPath(hash), 'utf8')) || null
+    const path = storedBlob(record && !record.deleted ? parseManifest(record.body)?.[TITLE] : null)
+    return path ? cleanTitle(readFileSync(path, 'utf8')) || null : null
   }
 
   // Meeting audio carries everyone's voices, biometric data under LGPD, so it's kept for retentionDays from the
