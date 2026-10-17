@@ -24,6 +24,7 @@ First launch asks for **Accessibility** (hotkeys and pasting; relaunch after gra
 | Esc | Cancel dictation |
 | Ctrl+Opt+Cmd+M | Start or stop a meeting recording |
 | Ctrl+Opt+Cmd+D | Open the dashboard (or open the app again) |
+| Cmd+R | Rename the selected meeting (Meetings section) |
 
 ## Dashboard
 
@@ -31,7 +32,7 @@ Home (stats and dictation history), Meetings (transcripts, re-transcribe), Peopl
 
 Dictionary words are sent to Scribe as key terms. A replacement also rewrites what Scribe heard, which is how to fix names that sound like common words (Screamer to screamr). Snippets expand a spoken trigger phrase into text. Data lives in `~/Library/Application Support/Screamr/`.
 
-Meetings are saved to `~/Library/Application Support/Screamr/Meetings/<date>/` as `mic.m4a`, `system.m4a` and `transcript.md`. The mic channel is labeled "You" (or "Room N" when several people share the mic); call audio is diarized into "Speaker N". Use headphones on calls, otherwise the mic also picks up the other side.
+Meetings are saved to `~/Library/Application Support/Screamr/Meetings/<date>/` as `mic.m4a`, `system.m4a` and `transcript.md`. Give a meeting a title with Cmd+R (or "Rename meeting" in the palette); it lives in the folder's `title.txt`, heads the transcript and syncs to the iPhone. An empty title goes back to the date. The mic channel is labeled "You" (or "Room N" when several people share the mic); call audio is diarized into "Speaker N". Use headphones on calls, otherwise the mic also picks up the other side.
 
 ## People
 
@@ -41,7 +42,7 @@ Each meeting folder keeps `mic.words.json` / `system.words.json` (Scribe's word 
 
 ## iPhone
 
-`ios/` is a meeting recorder for in-person meetings: tap record, lock the phone, tap stop, and the recording is transcribed by Scribe with speakers separated. It shares the Scribe client, transcript rendering and palette with the Mac app, and keeps the same folder layout (`mic.m4a`, `mic.words.json`, `transcript.md`) under Documents/Meetings, which the Files app can browse. The API key goes in the app's Settings and is stored in the Keychain. Requires iOS 17 and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+`ios/` is a meeting recorder for in-person meetings: tap record, lock the phone, tap stop, and the recording is transcribed by Scribe with speakers separated. It shares the Scribe client, transcript rendering and palette with the Mac app, and keeps the same folder layout (`mic.m4a`, `mic.words.json`, `transcript.md`) under Documents/Meetings, which the Files app can browse. The API key goes in the app's Settings and is stored in the Keychain. Rename a meeting from the pencil button on its screen. Requires iOS 17 and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```sh
 ios/run.sh          # booted simulator
@@ -55,6 +56,7 @@ Meetings sync between the Mac and the iPhone through a small server you run your
 - **iPhone recordings** reach the Mac, which recognizes the speakers; their names come back in `names.json`, so the phone shows them too.
 - **Mac meetings** reach the iPhone as transcripts. Audio stays on the device that recorded it, plus the server.
 - **When:** the Mac syncs on launch, every 5 minutes and after each transcription; the iPhone when opened, after a transcription and on pull-to-refresh.
+- **Titles:** `title.txt` syncs like any other file, and the server can set one too (`PUT /meetings/<id>/title` with `{ "title": "..." }`, the same token), which is how pdi-lab renames meetings. `GET /metrics` returns each meeting's `title`.
 - **Settings:** server URL and token, on the Mac in Settings > Sync (stored in `~/.config/screamr/sync.json`, mode 600), on the iPhone in Settings (token in the Keychain).
 
 Deploying, as on munchkin: copy `server/server.mjs` to `~/services/screamr-sync/app/`, put `SCREAMR_SYNC_TOKEN=$(openssl rand -hex 32)` in `~/services/screamr-sync/.env`, run it as a read-only `node:26-alpine` container with `./screamr-sync/data` mounted at `/data`, and expose it to the tailnet only with `tailscale serve --bg --https=8796 http://127.0.0.1:8796`.
