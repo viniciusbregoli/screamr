@@ -35,3 +35,29 @@ private func all(_: String) -> Bool { true }
     #expect(r.download == ["a"])
     #expect(r.merged == ["a": "1"])
 }
+
+@Test func retiredAudioWinsOverALocalCopyWhichGetsDeleted() {
+    let r = SyncEngine.merge(base: ["mic.m4a": "a1"], local: ["mic.m4a": "a1", "mic.words.json": "w1"],
+                             remote: ["mic.m4a": SyncEngine.retired, "mic.words.json": "w1"], wants: all)
+    #expect(r.merged["mic.m4a"] == SyncEngine.retired)
+    #expect(r.delete == ["mic.m4a"])
+    #expect(r.download.isEmpty)
+}
+
+@Test func retiredStaysRetiredEvenIfTheServerHasTheFileAgain() {
+    // e.g. the server restored from a backup older than the retirement: never download it again.
+    let r = SyncEngine.merge(base: ["mic.m4a": SyncEngine.retired], local: [:], remote: ["mic.m4a": "a1"], wants: all)
+    #expect(r.merged["mic.m4a"] == SyncEngine.retired)
+    #expect(r.download.isEmpty)
+    #expect(r.delete.isEmpty)
+}
+
+@Test func aDeviceOfflinePastRetentionDeletesItsAudioAndNeverReuploads() {
+    // Offline for months: it still has the audio and last saw a hash; the server has since retired it.
+    let r = SyncEngine.merge(base: ["system.m4a": "s1"], local: ["system.m4a": "s1"], remote: ["system.m4a": SyncEngine.retired], wants: all)
+    #expect(r.delete == ["system.m4a"])
+    #expect(r.merged == ["system.m4a": SyncEngine.retired])
+    // And after deleting, the next run sees nothing to push or fetch.
+    let next = SyncEngine.merge(base: r.merged, local: [:], remote: r.merged, wants: all)
+    #expect(next.merged == r.merged && next.download.isEmpty && next.delete.isEmpty)
+}
