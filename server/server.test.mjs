@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, rmSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { meetingDate, parseManifest, RETIRED, start } from './server.mjs'
+import { cleanTitle, meetingDate, parseManifest, RETIRED, start, TITLE } from './server.mjs'
 
 test('records keep the latest edit, blobs are checked against their hash', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'screamr-sync-'))
@@ -144,4 +144,56 @@ test('a meeting record must be a file manifest, so retention can always read it'
     await s.close()
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('a meeting title is stored as title.txt in a new version of its record', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'screamr-sync-'))
+  const s = await start({ dataDir: dir, token: 't' })
+  const base = `http://127.0.0.1:${s.port}`
+  const auth = { authorization: 'Bearer t' }
+  const rename = (id, body, headers = auth) => fetch(`${base}/meetings/${encodeURIComponent(id)}/title`, { method: 'PUT', headers, body: JSON.stringify(body) })
+  const record = async (id) => (await fetch(`${base}/changes?since=0`, { headers: auth }).then((r) => r.json())).records.find((r) => r.id === id)
+  const blob = async (hash) => (await fetch(`${base}/blobs/${hash}`, { headers: auth })).text()
+  const id = '2026-10-16 14.00.00'
+  try {
+    const words = Buffer.from(JSON.stringify('Vou entregar sexta'.split(' ').map((text, i) => ({ text, type: 'word', speaker_id: 'speaker_0', start: i, end: i + 0.5 }))))
+    const wordsHash = createHash('sha256').update(words).digest('hex')
+    await fetch(`${base}/blobs/${wordsHash}`, { method: 'PUT', headers: auth, body: words })
+    await fetch(`${base}/records`, { method: 'POST', headers: auth, body: JSON.stringify([{ kind: 'meeting', id, body: JSON.stringify({ 'mic.m4a': 'aa', 'mic.words.json': wordsHash }), updated: 1 }]) })
+    const before = await record(id)
+
+    assert.equal((await rename(id, { title: 'x' }, {})).status, 401)
+    assert.equal((await rename('nope', { title: 'x' })).status, 404)
+    assert.equal((await rename(id, { title: 3 })).status, 400)
+    assert.equal((await rename(id, { title: 'x'.repeat(121) })).status, 400)
+
+    const ok = await rename(id, { title: '  Planejamento\nsprint 42  ' })
+    assert.deepEqual(await ok.json(), { ok: true, title: 'Planejamento sprint 42' })
+    const after = await record(id)
+    assert.ok(after.seq > before.seq, 'devices see it as a change')
+    const manifest = JSON.parse(after.body)
+    assert.equal(manifest['mic.m4a'], 'aa', 'other files untouched')
+    assert.equal(await blob(manifest[TITLE]), 'Planejamento sprint 42')
+    const metrics = await fetch(`${base}/metrics`, { headers: auth }).then((r) => r.json())
+    assert.equal(metrics.metrics.find((m) => m.meeting === id).title, 'Planejamento sprint 42')
+
+    // Clearing keeps the entry with an empty file: devices never drop a file the manifest stops listing.
+    await rename(id, { title: '' })
+    const cleared = JSON.parse((await record(id)).body)
+    assert.equal(await blob(cleared[TITLE]), '')
+    const untitled = await fetch(`${base}/metrics`, { headers: auth }).then((r) => r.json())
+    assert.equal(untitled.metrics.find((m) => m.meeting === id).title, null)
+
+    await fetch(`${base}/records`, { method: 'POST', headers: auth, body: JSON.stringify([{ kind: 'meeting', id, body: '{}', updated: 99999999999, deleted: true }]) })
+    assert.equal((await rename(id, { title: 'x' })).status, 404)
+  } finally {
+    await s.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('titles are one line, trimmed and at most 120 characters', () => {
+  assert.equal(cleanTitle('  a\r\nb  '), 'a b')
+  assert.equal(cleanTitle('é'.repeat(120)), 'é'.repeat(120))
+  assert.equal(cleanTitle('é'.repeat(121)), null)
 })
