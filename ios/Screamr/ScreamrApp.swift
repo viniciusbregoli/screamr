@@ -21,6 +21,7 @@ struct HomeView: View {
     @Environment(Library.self) private var library
     @Environment(MeetingRecorder.self) private var recorder
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(Theme.key) private var theme = "mocha"
     @State private var showSettings = false
     @State private var error: String?
 
@@ -35,7 +36,14 @@ struct HomeView: View {
                 .onDelete { $0.map { library.meetings[$0] }.forEach(library.delete) }
             }
             .scrollContentBackground(.hidden)
-            .background(Theme.base)
+            .background {
+                ZStack {
+                    Theme.base
+                    if Theme.glows { NeonAmbient() }
+                }
+                .ignoresSafeArea()
+            }
+            .id(theme) // rows read the palette when drawn, so a theme change redraws them
             .refreshable { await sync() }
             .overlay {
                 if library.meetings.isEmpty {
@@ -83,6 +91,7 @@ struct HomeView: View {
                     .frame(width: 72, height: 72)
                     .background(Circle().fill(recorder.folder == nil ? Theme.mauve : Theme.red))
                     .foregroundStyle(Theme.crust)
+                    .glow(recorder.folder == nil ? Theme.mauve : Theme.red, radius: 10)
             }
             .accessibilityLabel(recorder.folder == nil ? "Start recording" : "Stop recording")
             .keyboardShortcut("r", modifiers: .command)
@@ -211,10 +220,35 @@ struct SettingsView: View {
     @State private var key = Keychain.apiKey ?? ""
     @State private var syncURL = UserDefaults.standard.string(forKey: "syncURL") ?? ""
     @State private var syncToken = Keychain.syncToken ?? ""
+    @AppStorage(Theme.key) private var theme = "mocha"
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    ForEach(Theme.all, id: \.id) { p in
+                        Button { theme = p.id } label: {
+                            HStack(spacing: 12) {
+                                HStack(spacing: 4) {
+                                    ForEach([p.mauve, p.blue, p.green, p.yellow, p.red], id: \.self) { hex in
+                                        Circle().fill(Color(hex: hex)).frame(width: 9, height: 9)
+                                            .shadow(color: p.glows ? Color(hex: hex).opacity(0.9) : .clear, radius: 3)
+                                    }
+                                }
+                                .padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(Color(hex: p.base), in: Capsule())
+                                Text(p.name).foregroundStyle(Theme.text)
+                                Spacer()
+                                if theme == p.id { Image(systemName: "checkmark").foregroundStyle(Theme.mauve) }
+                            }
+                        }
+                        .accessibilityLabel(p.name)
+                        .accessibilityAddTraits(theme == p.id ? .isSelected : [])
+                    }
+                } header: {
+                    Text("Appearance")
+                }
+                .listRowBackground(Theme.surface0)
                 Section {
                     SecureField("API key", text: $key)
                         .textInputAutocapitalization(.never)
