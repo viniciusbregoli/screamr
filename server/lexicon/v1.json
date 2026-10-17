@@ -1,0 +1,12 @@
+{
+  "version": "lexicon-v1",
+  "notes": "Provisional, from the PDI brief (2026-10-16). Hedges and fillers are matched on lowercase words with punctuation stripped. Changing a list means a new version file, so every stored metric says which list produced it.",
+  "hedges": {
+    "pt": ["acho", "talvez", "meio que", "não sei se", "tipo", "sei lá", "de repente"],
+    "en": ["i think", "maybe", "kind of", "sort of", "i guess"]
+  },
+  "fillers": {
+    "always": ["um", "uh", "uhm", "er", "erm", "hmm", "hm", "hum", "ahn", "ãh", "uhu"],
+    "only_alone": ["é", "eh", "ah", "e"]
+  }
+}

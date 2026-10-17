@@ -43,3 +43,34 @@ test('records keep the latest edit, blobs are checked against their hash', async
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('meetings get speech metrics when they sync, and lose them when deleted', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'screamr-sync-'))
+  const s = await start({ dataDir: dir, token: 't' })
+  const base = `http://127.0.0.1:${s.port}`
+  const auth = { authorization: 'Bearer t' }
+  const put = async (value) => {
+    const data = Buffer.from(JSON.stringify(value))
+    const hash = createHash('sha256').update(data).digest('hex')
+    await fetch(`${base}/blobs/${hash}`, { method: 'PUT', headers: auth, body: data })
+    return hash
+  }
+  const post = (records) => fetch(`${base}/records`, { method: 'POST', headers: auth, body: JSON.stringify(records) })
+  try {
+    const words = 'Eu acho que, tipo, dá'.split(' ').map((text, i) => ({ text, type: 'word', speaker_id: 'speaker_0', start: i * 0.4, end: i * 0.4 + 0.3 }))
+    const manifest = { 'mic.words.json': await put(words), 'meta.json': await put({ transcription_mode: 'verbatim', source: 'mac', model_id: 'scribe_v2', languages: { mic: 'por' } }) }
+    await post([{ kind: 'meeting', id: 'm1', body: JSON.stringify(manifest), updated: 1 }])
+    const { metrics } = await fetch(`${base}/metrics`, { headers: auth }).then((r) => r.json())
+    assert.equal(metrics.length, 1)
+    assert.equal(metrics[0].meeting, 'm1')
+    assert.deepEqual(metrics[0].hedges.by_phrase, { acho: 1, tipo: 1 })
+    assert.equal(metrics[0].eligible, true)
+    assert.equal(JSON.stringify(metrics).includes('dá'), false) // no transcript text leaves the server
+
+    await post([{ kind: 'meeting', id: 'm1', body: '{}', updated: 2, deleted: true }])
+    assert.equal((await fetch(`${base}/metrics`, { headers: auth }).then((r) => r.json())).metrics.length, 0)
+  } finally {
+    await s.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -4,10 +4,13 @@
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { computeMetrics, METRICS_VERSION } from './metrics.mjs'
 
-export function start({ dataDir, token, port = 0, host = '127.0.0.1' }) {
+const defaultLexicon = () => JSON.parse(readFileSync(new URL('./lexicon/v1.json', import.meta.url)))
+
+export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = defaultLexicon() }) {
   if (!token) throw new Error('SCREAMR_SYNC_TOKEN missing')
   const blobs = join(dataDir, 'blobs')
   const tmp = join(dataDir, 'tmp')
@@ -21,7 +24,8 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1' }) {
       kind TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL,
       updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL,
       PRIMARY KEY (kind, id));
-    CREATE INDEX IF NOT EXISTS records_seq ON records (seq);`)
+    CREATE INDEX IF NOT EXISTS records_seq ON records (seq);
+    CREATE TABLE IF NOT EXISTS metrics (meeting TEXT PRIMARY KEY, version TEXT NOT NULL, body TEXT NOT NULL);`)
   const changes = db.prepare('SELECT kind, id, body, updated, deleted, seq FROM records WHERE seq > ? ORDER BY seq')
   // A write only lands if it is newer than what the server has; every landed write gets the next seq.
   const upsert = db.prepare(`
@@ -31,6 +35,31 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1' }) {
       deleted = excluded.deleted, seq = excluded.seq
     WHERE excluded.updated > records.updated`)
   const maxSeq = db.prepare('SELECT coalesce(max(seq), 0) AS seq FROM records')
+
+  // Speech metrics per meeting, recomputed when its files change or the metric or word-list version does.
+  const metricsVersion = `${METRICS_VERSION}+${lexicon.version}`
+  const meetingRecord = db.prepare("SELECT body, deleted FROM records WHERE kind = 'meeting' AND id = ?")
+  const saveMetrics = db.prepare('INSERT INTO metrics (meeting, version, body) VALUES (?, ?, ?) ON CONFLICT (meeting) DO UPDATE SET version = excluded.version, body = excluded.body')
+  const dropMetrics = db.prepare('DELETE FROM metrics WHERE meeting = ?')
+  const allMetrics = db.prepare('SELECT meeting, body FROM metrics ORDER BY meeting')
+  const readBlob = (manifest, name) => {
+    const hash = manifest[name]
+    if (!hash || !existsSync(blobPath(hash))) return undefined
+    return JSON.parse(readFileSync(blobPath(hash), 'utf8'))
+  }
+  const updateMetrics = (id) => {
+    try {
+      const record = meetingRecord.get(id)
+      const manifest = record && !record.deleted ? JSON.parse(record.body) : {}
+      const mic = readBlob(manifest, 'mic.words.json')
+      if (!mic) return dropMetrics.run(id)
+      const metrics = computeMetrics({ mic, system: readBlob(manifest, 'system.words.json') ?? [], meta: readBlob(manifest, 'meta.json') ?? null, lexicon })
+      saveMetrics.run(id, metricsVersion, JSON.stringify({ ...metrics, computed_at: new Date().toISOString() }))
+    } catch (e) {
+      // Metrics are derived data: a bad file must never break sync.
+      console.error(`metrics for ${id} failed: ${e.message}`)
+    }
+  }
 
   // restic backs up the data dir nightly; copying a live SQLite file can catch it mid-write,
   // so a consistent copy is kept next to it.
@@ -62,6 +91,10 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1' }) {
   })
   const blobPath = (hash) => join(blobs, hash.slice(0, 2), hash)
 
+  // Catch up on meetings synced before this metric or word-list version.
+  const stale = db.prepare("SELECT r.id FROM records r LEFT JOIN metrics m ON m.meeting = r.id WHERE r.kind = 'meeting' AND r.deleted = 0 AND (m.version IS NULL OR m.version != ?)")
+  for (const { id } of stale.all(metricsVersion)) updateMetrics(id)
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x')
     if (url.pathname === '/healthz') return send(res, 200, { ok: true })
@@ -72,6 +105,10 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1' }) {
         const since = Number(url.searchParams.get('since') ?? 0)
         const records = changes.all(since).map((r) => ({ ...r, deleted: r.deleted === 1 }))
         return send(res, 200, { records, cursor: Number(maxSeq.get().seq) })
+      }
+
+      if (req.method === 'GET' && url.pathname === '/metrics') {
+        return send(res, 200, { metrics: allMetrics.all().map((r) => ({ meeting: r.meeting, ...JSON.parse(r.body) })) })
       }
 
       if (req.method === 'POST' && url.pathname === '/records') {
@@ -90,6 +127,8 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1' }) {
           db.exec('ROLLBACK')
           return send(res, 400, { error: e.message })
         }
+        // Clients upload a meeting's files before its record, so they're all here by now.
+        for (const r of records) if (r.kind === 'meeting') updateMetrics(r.id)
         return send(res, 200, { cursor: Number(maxSeq.get().seq) })
       }
 
