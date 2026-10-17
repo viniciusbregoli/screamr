@@ -438,7 +438,8 @@ private struct MeetingsPane: View {
     /// Bumped after a correction, since a line fix rewrites files without changing the store.
     @State private var edits = 0
     @Environment(\.zoom) private var zoom
-    private static let colors = [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender]
+    // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
+    private static var colors: [Color] { [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender] }
 
     private var selected: MeetingInfo? { store.meetings.first { $0.id == selection } }
 
@@ -685,7 +686,8 @@ private struct PersonRow: View {
     var markMe: () -> Void = {}
     @State private var draft = ""
     @FocusState private var editing: Bool
-    private static let colors = [Theme.mauve, Theme.blue, Theme.green, Theme.peach, Theme.pink, Theme.teal, Theme.yellow, Theme.lavender]
+    // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
+    private static var colors: [Color] { [Theme.mauve, Theme.blue, Theme.green, Theme.peach, Theme.pink, Theme.teal, Theme.yellow, Theme.lavender] }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -979,7 +981,8 @@ private struct ThemeSwatch: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 5) {
-                ForEach([palette.mauve, palette.blue, palette.green, palette.yellow, palette.red], id: \.self) { hex in
+                // By position: palettes can repeat a color.
+                ForEach(Array([palette.mauve, palette.blue, palette.green, palette.yellow, palette.red].enumerated()), id: \.offset) { _, hex in
                     Circle().fill(Color(hex: hex)).frame(width: 10, height: 10)
                         .shadow(color: palette.glows ? Color(hex: hex).opacity(0.9) : .clear, radius: 4)
                 }
@@ -991,27 +994,6 @@ private struct ThemeSwatch: View {
         .background(Color(hex: palette.base), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? Theme.mauve : Color(hex: palette.surface1), lineWidth: selected ? 2 : 1))
         .contentShape(Rectangle())
-    }
-}
-
-/// Neon only: two soft lights drifting behind the sidebar. Still when Reduce Motion is on.
-private struct NeonAmbient: View {
-    @State private var drift = false
-
-    var body: some View {
-        GeometryReader { g in
-            ZStack {
-                Circle().fill(Theme.mauve.opacity(0.22)).frame(width: 220).blur(radius: 70)
-                    .position(x: g.size.width * (drift ? 0.85 : 0.15), y: g.size.height * (drift ? 0.3 : 0.08))
-                Circle().fill(Theme.lavender.opacity(0.15)).frame(width: 240).blur(radius: 80)
-                    .position(x: g.size.width * (drift ? 0.15 : 0.8), y: g.size.height * (drift ? 0.75 : 0.95))
-            }
-        }
-        .allowsHitTesting(false)
-        .onAppear {
-            guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-            withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) { drift = true }
-        }
     }
 }
 
