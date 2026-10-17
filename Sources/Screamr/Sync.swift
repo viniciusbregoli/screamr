@@ -94,6 +94,8 @@ actor SyncEngine {
         let now = Date().timeIntervalSince1970
         var outgoing = state.pendingDeletes.map { Record(kind: "meeting", id: $0, body: "{}", updated: now, deleted: true) }
         var received: [(dir: URL, files: [String])] = []
+        // Retired audio that couldn't be deleted: reported after the other meetings sync, retried next run.
+        var undeleted: [String] = []
         let local = ((try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.hasDirectoryPath && !$0.lastPathComponent.hasPrefix(".") }
             .map(\.lastPathComponent)
@@ -105,7 +107,11 @@ actor SyncEngine {
             let theirs = remote[id] ?? base
             let mine = try manifest(dir)
             let (merged, download, delete) = Self.merge(base: base, local: mine, remote: theirs, wants: wants)
-            for name in delete { try? FileManager.default.removeItem(at: dir.appendingPathComponent(name)) }
+            for name in delete {
+                do { try FileManager.default.removeItem(at: dir.appendingPathComponent(name)) }
+                catch let error as CocoaError where error.code == .fileNoSuchFile {}
+                catch { undeleted.append("\(id)/\(name): \(error.localizedDescription)") }
+            }
             if !download.isEmpty {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 for name in download { try await fetch(config, hash: theirs[name]!, to: dir.appendingPathComponent(name)) }
@@ -130,6 +136,7 @@ actor SyncEngine {
         // Our own writes come back next time as no-ops, since they already match `base`.
         state.cursor = changes.cursor
         save(state)
+        if !undeleted.isEmpty { throw SyncError(message: "Couldn't delete retired audio: \(undeleted.joined(separator: "; "))") }
         return received
     }
 
