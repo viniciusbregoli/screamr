@@ -9,6 +9,10 @@ import Testing
     #expect(Scribe.fallbackLanguage(detected: "spa") == "por")
     #expect(Scribe.fallbackLanguage(detected: "glg") == "por")
     #expect(Scribe.fallbackLanguage(detected: "deu") == "eng")
+    // Two-letter and regional codes mean the same languages.
+    #expect(Scribe.fallbackLanguage(detected: "en") == nil)
+    #expect(Scribe.fallbackLanguage(detected: "pt-BR") == nil)
+    #expect(Scribe.fallbackLanguage(detected: "es") == "por")
 }
 
 @Test func verbatimOnlyFlipsNoVerbatim() {

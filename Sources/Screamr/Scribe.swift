@@ -94,8 +94,18 @@ enum Scribe {
     }
 
     static func fallbackLanguage(detected: String?) -> String? {
-        guard let detected, !languages.contains(detected) else { return nil }
-        return nearPortuguese.contains(detected) ? "por" : "eng"
+        guard let detected else { return nil }
+        let code = iso639_3(detected)
+        guard !languages.contains(code) else { return nil }
+        return nearPortuguese.contains(code) ? "por" : "eng"
+    }
+
+    /// Scribe answers with three-letter codes ("por"), but its docs show two-letter ones ("en");
+    /// accepting both keeps a code-format change from forcing every take through a second, billed request.
+    static func iso639_3(_ code: String) -> String {
+        let twoLetter = ["en": "eng", "pt": "por", "es": "spa", "gl": "glg", "ca": "cat", "it": "ita", "fr": "fra", "ro": "ron"]
+        let base = code.lowercased().split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init) ?? code.lowercased()
+        return twoLetter[base] ?? base
     }
 
     private static func send(audio: Data, filename: String, mime: String, fields: [(String, String)], apiKey: String, timeout: TimeInterval) async throws -> Response {
