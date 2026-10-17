@@ -11,6 +11,10 @@ final class Recorder {
     private let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)!
     private var pcm = Data()
     private let lock = NSLock()
+    private var _level: Float = 0
+
+    /// Loudness of the latest buffer, 0 (below -50 dB) to 1 (-10 dB and up), for the flow bar.
+    var level: Float { lock.withLock { _level } }
 
     /// With `url`, audio streams to an AAC file on disk (long meetings) instead of memory.
     private var file: AVAudioFile?
@@ -36,6 +40,12 @@ final class Recorder {
                 status.pointee = .haveData
                 return buffer
             }
+            if let samples = out.int16ChannelData?[0], out.frameLength > 0 {
+                var sum: Float = 0
+                for i in 0..<Int(out.frameLength) { let s = Float(samples[i]) / 32768; sum += s * s }
+                let db = 10 * log10(max(sum / Float(out.frameLength), 1e-10))
+                self.lock.withLock { self._level = min(1, max(0, (db + 50) / 40)) }
+            }
             if let file = self.file {
                 try? file.write(from: out)
                 return
@@ -50,6 +60,7 @@ final class Recorder {
 
     /// Stops capture and returns the take as a WAV file, plus its duration in seconds.
     func stop() -> (wav: Data, seconds: Double) {
+        lock.withLock { _level = 0 }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         file = nil // closing the AVAudioFile finalizes the m4a
