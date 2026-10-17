@@ -47,6 +47,7 @@ struct Dashboard: View {
     let actions: DashboardActions
     @State private var pane: Pane
     @AppStorage("zoom") private var zoom = 1.0
+    @AppStorage(Theme.key) private var theme = "mocha"
     @StateObject private var command = CommandKeyWatcher()
     @State private var palette = false
     @State private var help = false
@@ -79,10 +80,11 @@ struct Dashboard: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Mocha.base)
+            .background(Theme.base)
+            .id(theme) // panes read the palette when drawn, so a theme change redraws them
         }
-        .foregroundStyle(Mocha.text)
-        .tint(Mocha.mauve)
+        .foregroundStyle(Theme.text)
+        .tint(Theme.mauve)
         .background(shortcutButtons)
         .focusable()
         .focusEffectDisabled()
@@ -96,7 +98,7 @@ struct Dashboard: View {
             CommandPalette(commands: commands) { palette = false }
         }
         .sheet(isPresented: $help) { HelpSheet { help = false } }
-        .buttonStyle(MochaButton())
+        .buttonStyle(ThemeButton())
         .zfont(13)
         .environment(\.zoom, zoom)
     }
@@ -107,13 +109,14 @@ struct Dashboard: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 22, height: 22)
-                Text("screamr").zfont(15, .semibold)
+                Text("screamr").zfont(15, .semibold).glow(Theme.mauve, radius: 5)
             }
             .padding(.horizontal, 8).padding(.bottom, 14)
             ForEach(Pane.allCases) { p in
                 Button { pane = p } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: p.icon).zfont(13).frame(width: 18).foregroundStyle(pane == p ? Mocha.mauve : Mocha.overlay2)
+                        Image(systemName: p.icon).zfont(13).frame(width: 18).foregroundStyle(pane == p ? Theme.mauve : Theme.overlay2)
+                            .glow(pane == p ? Theme.mauve : .clear)
                         Text(p.rawValue)
                         Spacer()
                         KeyChip("⌘\(String(p.key.character))")
@@ -121,8 +124,13 @@ struct Dashboard: View {
                             .animation(.easeOut(duration: 0.12), value: command.held)
                     }
                     .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(pane == p ? Mocha.surface0 : .clear, in: RoundedRectangle(cornerRadius: 7))
-                    .foregroundStyle(pane == p ? Mocha.text : Mocha.subtext0)
+                    .background(pane == p ? Theme.surface0 : .clear, in: RoundedRectangle(cornerRadius: 7))
+                    .overlay {
+                        if pane == p && Theme.glows {
+                            RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.mauve.opacity(0.55), lineWidth: 1).glow(Theme.mauve, radius: 5)
+                        }
+                    }
+                    .foregroundStyle(pane == p ? Theme.text : Theme.subtext0)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -132,24 +140,32 @@ struct Dashboard: View {
                 HStack(spacing: 8) {
                     Image(systemName: store.meetingActive ? "stop.fill" : "circle.fill")
                         .zfont(store.meetingActive ? 10 : 9)
-                        .foregroundStyle(store.meetingActive ? Mocha.crust : Mocha.red)
+                        .foregroundStyle(store.meetingActive ? Theme.crust : Theme.red)
+                        .glow(store.meetingActive ? .clear : Theme.red, radius: 4)
                     Text(store.transcribingMeeting ? "Transcribing..." : store.meetingActive ? "Stop meeting" : "Record meeting")
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(store.meetingActive ? Mocha.red : Mocha.surface0, in: RoundedRectangle(cornerRadius: 8))
-                .foregroundStyle(store.meetingActive ? Mocha.crust : Mocha.text)
+                .background(store.meetingActive ? Theme.red : Theme.surface0, in: RoundedRectangle(cornerRadius: 8))
+                .foregroundStyle(store.meetingActive ? Theme.crust : Theme.text)
             }
             .buttonStyle(.plain)
             .disabled(store.transcribingMeeting)
             .help("⌃⌥⌘M")
             HStack(spacing: 6) { KeyChip("⌘K"); Text("Commands"); Spacer(); KeyChip("?"); Text("Help") }
-                .zfont(11).foregroundStyle(Mocha.overlay2).padding(.top, 10).padding(.horizontal, 2)
+                .zfont(11).foregroundStyle(Theme.overlay2).padding(.top, 10).padding(.horizontal, 2)
         }
         .padding(12)
-        .padding(.top, 6)
+        .padding(.top, 34) // clears the window buttons, since the sidebar runs under the title bar
         .frame(width: 210 * zoom)
-        .background(Mocha.mantle)
+        .background {
+            ZStack {
+                Theme.mantle
+                if Theme.glows { NeonAmbient() }
+            }
+            .clipped()
+        }
+        .ignoresSafeArea(.container, edges: .top)
     }
 
     private var shortcutButtons: some View {
@@ -175,7 +191,7 @@ struct Dashboard: View {
                 NSWorkspace.shared.open(Meeting.root)
             },
             PaletteCommand(title: "Show keyboard shortcuts", hint: "?") { help = true },
-        ]
+        ] + Theme.all.map { p in PaletteCommand(title: "Theme: \(p.name)", hint: "") { theme = p.id } }
     }
 }
 
@@ -225,20 +241,20 @@ final class CommandKeyWatcher: ObservableObject {
 }
 
 /// System bordered buttons keep a fixed control size, so they clip when zoomed and ignore the theme.
-struct MochaButton: ButtonStyle {
+struct ThemeButton: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(configuration.isPressed ? Mocha.surface1 : Mocha.surface0, in: RoundedRectangle(cornerRadius: 6))
-            .foregroundStyle(configuration.role == .destructive ? Mocha.red : Mocha.text)
+            .background(configuration.isPressed ? Theme.surface1 : Theme.surface0, in: RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(configuration.role == .destructive ? Theme.red : Theme.text)
             .opacity(enabled ? 1 : 0.45)
             .contentShape(Rectangle())
     }
 }
 
 /// Plain text fields otherwise draw their placeholder in the same color as typed text.
-func placeholder(_ text: String) -> Text { Text(text).foregroundColor(Mocha.overlay2) }
+func placeholder(_ text: String) -> Text { Text(text).foregroundColor(Theme.overlay2) }
 
 struct KeyChip: View {
     let label: String
@@ -246,8 +262,8 @@ struct KeyChip: View {
     var body: some View {
         Text(label).zfont(10, design: .monospaced)
             .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(Mocha.surface0, in: RoundedRectangle(cornerRadius: 4))
-            .foregroundStyle(Mocha.subtext0)
+            .background(Theme.surface0, in: RoundedRectangle(cornerRadius: 4))
+            .foregroundStyle(Theme.subtext0)
     }
 }
 
@@ -256,8 +272,8 @@ private struct PaneHeader: View {
     var blurb: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).zfont(22, .bold)
-            if let blurb { Text(blurb).foregroundStyle(Mocha.subtext0).fixedSize(horizontal: false, vertical: true) }
+            Text(title).zfont(22, .bold).glow(Theme.mauve, radius: 7)
+            if let blurb { Text(blurb).foregroundStyle(Theme.subtext0).fixedSize(horizontal: false, vertical: true) }
         }
     }
 }
@@ -296,25 +312,25 @@ private struct HomePane: View {
             PaneHeader(title: "Home")
             stats
             HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(Mocha.overlay2)
+                Image(systemName: "magnifyingglass").foregroundStyle(Theme.overlay2)
                 TextField("", text: $query, prompt: placeholder("Search history")).textFieldStyle(.plain).focused($searchFocused)
                     .onExitCommand { query = ""; searchFocused = false }
                 KeyChip("/")
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(Mocha.surface0, in: RoundedRectangle(cornerRadius: 8))
+            .background(Theme.surface0, in: RoundedRectangle(cornerRadius: 8))
 
             if filtered.isEmpty {
                 Text(store.history.isEmpty ? "Hold Fn anywhere and start talking. Your dictations show up here." : "No dictations match \u{201C}\(query)\u{201D}.")
-                    .foregroundStyle(Mocha.subtext0)
+                    .foregroundStyle(Theme.subtext0)
                 Spacer()
             } else {
                 List(selection: $selection) {
                     ForEach(days, id: \.title) { day in
                         // A plain row rather than a Section header, which macOS paints with a gray bar.
-                        Text(day.title).zfont(11, .semibold).foregroundStyle(Mocha.subtext0)
+                        Text(day.title).zfont(11, .semibold).foregroundStyle(Theme.subtext0)
                             .padding(.top, 8)
-                            .listRowBackground(Mocha.base)
+                            .listRowBackground(Theme.base)
                             .listRowSeparator(.hidden)
                             .selectionDisabled()
                         ForEach(day.items) { d in row(d).tag(d.id) }
@@ -328,7 +344,7 @@ private struct HomePane: View {
                     KeyChip("↩"); Text("copies")
                     KeyChip("⌫").padding(.leading, 8); Text("deletes the selected dictation")
                 }
-                .zfont(11).foregroundStyle(Mocha.overlay2)
+                .zfont(11).foregroundStyle(Theme.overlay2)
             }
         }
         .panePadding()
@@ -351,7 +367,7 @@ private struct HomePane: View {
             ForEach(items, id: \.1) { value, label in
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(value).zfont(17, .semibold).monospacedDigit()
-                    Text(label).foregroundStyle(Mocha.subtext0)
+                    Text(label).foregroundStyle(Theme.subtext0)
                 }
             }
         }
@@ -364,11 +380,11 @@ private struct HomePane: View {
                 Text(d.text).lineLimit(3).zfont(13) // List rows don't inherit the outer font
                 Text([d.date.formatted(date: .omitted, time: .shortened), d.app, "\(d.words) word\(d.words == 1 ? "" : "s")"]
                         .compactMap { $0 }.joined(separator: " \u{00B7} "))
-                    .zfont(11).foregroundStyle(Mocha.overlay2)
+                    .zfont(11).foregroundStyle(Theme.overlay2)
             }
         }
         .padding(.vertical, 5)
-        .listRowBackground(selection == d.id ? Mocha.surface0 : Mocha.base)
+        .listRowBackground(selection == d.id ? Theme.surface0 : Theme.base)
         .contextMenu {
             Button("Copy") { copy(d) }
             Button("Delete", role: .destructive) { store.history.removeAll { $0.id == d.id } }
@@ -394,7 +410,7 @@ private struct AppIcon: View {
             if let image = name.flatMap(Self.icon) {
                 Image(nsImage: image).resizable()
             } else {
-                Image(systemName: "text.cursor").foregroundStyle(Mocha.overlay2)
+                Image(systemName: "text.cursor").foregroundStyle(Theme.overlay2)
             }
         }
         .frame(width: 18 * zoom, height: 18 * zoom)
@@ -420,7 +436,7 @@ private struct MeetingsPane: View {
     let actions: DashboardActions
     @State private var selection: MeetingInfo.ID?
     @Environment(\.zoom) private var zoom
-    private static let colors = [Mocha.mauve, Mocha.peach, Mocha.teal, Mocha.pink, Mocha.blue, Mocha.yellow, Mocha.green, Mocha.lavender]
+    private static let colors = [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender]
 
     private var selected: MeetingInfo? { store.meetings.first { $0.id == selection } }
 
@@ -436,21 +452,21 @@ private struct MeetingsPane: View {
                             Text(m.date?.formatted(date: .abbreviated, time: .shortened) ?? m.title).zfont(13, .medium)
                             Group {
                                 if m.transcript == nil {
-                                    Label("Not transcribed", systemImage: "exclamationmark.circle").foregroundStyle(Mocha.yellow)
+                                    Label("Not transcribed", systemImage: "exclamationmark.circle").foregroundStyle(Theme.yellow)
                                 } else {
-                                    Text(m.speakers.isEmpty ? "Transcribed" : m.speakers.joined(separator: ", ")).foregroundStyle(Mocha.overlay2)
+                                    Text(m.speakers.isEmpty ? "Transcribed" : m.speakers.joined(separator: ", ")).foregroundStyle(Theme.overlay2)
                                 }
                             }
                             .zfont(11).lineLimit(1)
                         }
                         .padding(.vertical, 3)
-                        .listRowBackground(selection == m.id ? Mocha.surface0 : Mocha.base)
+                        .listRowBackground(selection == m.id ? Theme.surface0 : Theme.base)
                     }
                     .scrollContentBackground(.hidden)
                     .frame(width: 240 * zoom)
 
                     if let m = selected { detail(m) } else {
-                        Text("Select a meeting").foregroundStyle(Mocha.subtext0).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        Text("Select a meeting").foregroundStyle(Theme.subtext0).frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
@@ -461,10 +477,10 @@ private struct MeetingsPane: View {
 
     private var empty: some View {
         VStack(spacing: 12) {
-            Image(systemName: "waveform").zfont(28).foregroundStyle(Mocha.overlay2)
+            Image(systemName: "waveform").zfont(28).foregroundStyle(Theme.overlay2)
             Text("No meetings yet").zfont(15, .semibold)
             Text("Record a call or an in-person meeting. Your mic and the call audio are kept apart, and each voice is recognized across meetings.")
-                .foregroundStyle(Mocha.subtext0).multilineTextAlignment(.center).frame(maxWidth: 380)
+                .foregroundStyle(Theme.subtext0).multilineTextAlignment(.center).frame(maxWidth: 380)
             Button(action: actions.toggleMeeting) { HStack { Text("Record meeting"); KeyChip("⌃⌥⌘M") } }
                 .padding(.top, 4)
         }
@@ -493,7 +509,7 @@ private struct MeetingsPane: View {
                 let speakers = segments.map(\.speaker).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
                 if segments.isEmpty {
                     Text(store.transcribingMeeting ? "Transcribing..." : "No transcript yet. The audio is saved, so you can transcribe it now.")
-                        .foregroundStyle(Mocha.subtext0).frame(maxWidth: .infinity, alignment: .leading).padding(18)
+                        .foregroundStyle(Theme.subtext0).frame(maxWidth: .infinity, alignment: .leading).padding(18)
                 } else {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(segments.indices, id: \.self) { i in
@@ -501,7 +517,7 @@ private struct MeetingsPane: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 8) {
                                     Text(s.speaker).zfont(12, .semibold).foregroundStyle(Self.colors[(speakers.firstIndex(of: s.speaker) ?? 0) % Self.colors.count])
-                                    Text(clock(s.start)).zfont(11).monospacedDigit().foregroundStyle(Mocha.overlay2)
+                                    Text(clock(s.start)).zfont(11).monospacedDigit().foregroundStyle(Theme.overlay2)
                                 }
                                 Text(TextRules.apply(s.text, replacements: store.replacements)).textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -513,7 +529,7 @@ private struct MeetingsPane: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
+            .background(Theme.mantle, in: RoundedRectangle(cornerRadius: 10))
         }
     }
 
@@ -544,7 +560,7 @@ private struct PeoplePane: View {
         VStack(alignment: .leading, spacing: 16) {
             PaneHeader(title: "People", blurb: "Recognized by voice across your meetings, entirely on this Mac. Name someone once and every transcript uses it.")
             if store.people.isEmpty {
-                Text("People show up here after your next transcribed meeting.").foregroundStyle(Mocha.subtext0)
+                Text("People show up here after your next transcribed meeting.").foregroundStyle(Theme.subtext0)
                 Spacer()
             } else {
                 ScrollView {
@@ -598,7 +614,7 @@ private struct PersonRow: View {
     let delete: () -> Void
     @State private var draft = ""
     @FocusState private var editing: Bool
-    private static let colors = [Mocha.mauve, Mocha.blue, Mocha.green, Mocha.peach, Mocha.pink, Mocha.teal, Mocha.yellow, Mocha.lavender]
+    private static let colors = [Theme.mauve, Theme.blue, Theme.green, Theme.peach, Theme.pink, Theme.teal, Theme.yellow, Theme.lavender]
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -606,7 +622,7 @@ private struct PersonRow: View {
                 .zfont(15, .bold)
                 .frame(width: 36, height: 36)
                 .background(Self.colors[person.number % Self.colors.count], in: Circle())
-                .foregroundStyle(Mocha.crust)
+                .foregroundStyle(Theme.crust)
             VStack(alignment: .leading, spacing: 4) {
                 TextField("", text: $draft, prompt: placeholder("\(person.displayName): who is this?"))
                     .textFieldStyle(.plain)
@@ -619,17 +635,17 @@ private struct PersonRow: View {
                     Text("·")
                     Text("last heard ") + Text(person.lastSeen, format: .relative(presentation: .named))
                 }
-                .zfont(11).foregroundStyle(Mocha.subtext0)
+                .zfont(11).foregroundStyle(Theme.subtext0)
                 if !person.quote.isEmpty {
-                    Text("\u{201C}\(person.quote)\u{201D}").italic().zfont(11).foregroundStyle(Mocha.overlay2).lineLimit(2)
+                    Text("\u{201C}\(person.quote)\u{201D}").italic().zfont(11).foregroundStyle(Theme.overlay2).lineLimit(2)
                 }
             }
             Spacer()
             if person.name.isEmpty && person.meetings.count >= 2 {
                 Text("Appears often").zfont(11, .semibold)
                     .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Mocha.yellow.opacity(0.2), in: Capsule())
-                    .foregroundStyle(Mocha.yellow)
+                    .background(Theme.yellow.opacity(0.2), in: Capsule())
+                    .foregroundStyle(Theme.yellow)
             }
             Menu("Merge into") {
                 ForEach(others) { o in Button(o.displayName) { merge(o.id) } }
@@ -639,10 +655,10 @@ private struct PersonRow: View {
             .disabled(others.isEmpty)
             .help("Same person split in two? Merge them.")
             Button { delete() } label: { Image(systemName: "trash") }
-                .buttonStyle(.plain).foregroundStyle(Mocha.overlay1).help("Forget this person")
+                .buttonStyle(.plain).foregroundStyle(Theme.overlay1).help("Forget this person")
         }
         .padding(12)
-        .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
+        .background(Theme.mantle, in: RoundedRectangle(cornerRadius: 10))
         .onAppear { draft = person.name }
         .onChange(of: person.name) { _, name in if !editing { draft = name } }
     }
@@ -669,7 +685,7 @@ private struct PairEditor<Item: Identifiable & Hashable>: View {
                     .keyboardShortcut("n", modifiers: .command)
             }
             if items.isEmpty {
-                Text("Nothing here yet. Press ⌘N to add one.").foregroundStyle(Mocha.subtext0)
+                Text("Nothing here yet. Press ⌘N to add one.").foregroundStyle(Theme.subtext0)
                 Spacer()
             } else {
                 // One table, rows split by hairlines, instead of a stack of cards.
@@ -679,12 +695,12 @@ private struct PairEditor<Item: Identifiable & Hashable>: View {
                         Text(secondLabel)
                         Spacer()
                     }
-                    .zfont(11, .semibold).foregroundStyle(Mocha.subtext0)
+                    .zfont(11, .semibold).foregroundStyle(Theme.subtext0)
                     .padding(.horizontal, 14).padding(.vertical, 9)
                     ScrollView {
                         VStack(spacing: 0) {
                             ForEach($items) { $item in
-                                Divider().overlay(Mocha.surface0)
+                                Divider().overlay(Theme.surface0)
                                 HStack(alignment: .top) {
                                     TextField("", text: $item[dynamicMember: first], prompt: placeholder(firstLabel))
                                         .focused($focused, equals: item.id)
@@ -692,18 +708,18 @@ private struct PairEditor<Item: Identifiable & Hashable>: View {
                                     TextField("", text: $item[dynamicMember: second], prompt: placeholder(secondLabel), axis: .vertical)
                                     Button { items.removeAll { $0.id == item.id } } label: { Image(systemName: "trash") }
                                         .buttonStyle(.plain)
-                                        .foregroundStyle(hovered == item.id ? Mocha.red : Mocha.overlay1)
+                                        .foregroundStyle(hovered == item.id ? Theme.red : Theme.overlay1)
                                         .help("Remove")
                                 }
                                 .textFieldStyle(.plain)
                                 .padding(.horizontal, 14).padding(.vertical, 10)
-                                .background(hovered == item.id ? Mocha.surface0.opacity(0.5) : .clear)
+                                .background(hovered == item.id ? Theme.surface0.opacity(0.5) : .clear)
                                 .onHover { hovered = $0 ? item.id : (hovered == item.id ? nil : hovered) }
                             }
                         }
                     }
                 }
-                .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
+                .background(Theme.mantle, in: RoundedRectangle(cornerRadius: 10))
             }
         }
         .panePadding()
@@ -731,19 +747,31 @@ private struct SettingsPane: View {
     @State private var refresh = 0
     @AppStorage(Recorder.inputKey) private var input = ""
     @AppStorage(CorrectionWatcher.enabledKey) private var learnCorrections = true
+    @AppStorage(Theme.key) private var theme = "mocha"
+    @Environment(\.zoom) private var zoom
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 PaneHeader(title: "Settings")
+                group("Appearance") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150 * zoom), spacing: 10)], alignment: .leading, spacing: 10) {
+                        ForEach(Theme.all, id: \.id) { p in
+                            Button { theme = p.id } label: { ThemeSwatch(palette: p, selected: theme == p.id) }
+                                .buttonStyle(.plain)
+                                .help(p.name)
+                        }
+                    }
+                    Text("Also in the command palette: \u{2318}K, then type \u{201C}theme\u{201D}.").zfont(11).foregroundStyle(Theme.subtext0)
+                }
                 group("ElevenLabs API key") {
                     HStack {
                         SecureField("", text: $key, prompt: placeholder("Paste a new key")).textFieldStyle(.plain)
-                            .padding(8).background(Mocha.surface0, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(8).background(Theme.surface0, in: RoundedRectangle(cornerRadius: 6))
                             .onSubmit(saveKey)
                         Button("Save", action: saveKey).disabled(key.isEmpty)
                     }
-                    Text("\(keyStatus). Stored in ~/.config/screamr/api_key, readable only by you.").zfont(11).foregroundStyle(Mocha.subtext0)
+                    Text("\(keyStatus). Stored in ~/.config/screamr/api_key, readable only by you.").zfont(11).foregroundStyle(Theme.subtext0)
                 }
                 group("Permissions") {
                     let _ = refresh
@@ -761,15 +789,15 @@ private struct SettingsPane: View {
                 group("Sync") {
                     HStack {
                         TextField("", text: $syncURL, prompt: placeholder("https://server.tailnet.ts.net:8796")).textFieldStyle(.plain)
-                            .padding(8).background(Mocha.surface0, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(8).background(Theme.surface0, in: RoundedRectangle(cornerRadius: 6))
                         SecureField("", text: $syncToken, prompt: placeholder(Store.syncConfig() == nil ? "Token" : "Token saved")).textFieldStyle(.plain)
-                            .padding(8).background(Mocha.surface0, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(8).background(Theme.surface0, in: RoundedRectangle(cornerRadius: 6))
                             .onSubmit(saveSync)
                         Button("Save", action: saveSync).disabled(syncURL.isEmpty)
                         Button("Sync now", action: actions.syncNow).disabled(Store.syncConfig() == nil)
                     }
                     Text(syncError ?? (store.syncStatus.isEmpty ? "Meetings sync with the iPhone app through your sync server." : store.syncStatus))
-                        .zfont(11).foregroundStyle(syncError == nil ? Mocha.subtext0 : Mocha.red)
+                        .zfont(11).foregroundStyle(syncError == nil ? Theme.subtext0 : Theme.red)
                 }
                 group("Microphone") {
                     let _ = refresh
@@ -782,7 +810,7 @@ private struct SettingsPane: View {
                         }
                     }
                     .frame(maxWidth: 420)
-                    Text("Used for dictation and meetings, from the next recording on.").zfont(11).foregroundStyle(Mocha.subtext0)
+                    Text("Used for dictation and meetings, from the next recording on.").zfont(11).foregroundStyle(Theme.subtext0)
                 }
                 group("General") {
                     Toggle("Launch screamr at login", isOn: $launchAtLogin)
@@ -792,10 +820,10 @@ private struct SettingsPane: View {
                             do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister(); loginError = nil }
                             catch { loginError = error.localizedDescription; launchAtLogin = !on }
                         }
-                    if let loginError { Text(loginError).zfont(11).foregroundStyle(Mocha.red) }
+                    if let loginError { Text(loginError).zfont(11).foregroundStyle(Theme.red) }
                     Toggle("Learn words I correct after dictating", isOn: $learnCorrections)
                     Text("For 30 seconds after a paste, screamr reads the text field you dictated into. If you retype a misheard name or term, it's added to the Dictionary. The text stays on this Mac.")
-                        .zfont(11).foregroundStyle(Mocha.subtext0).fixedSize(horizontal: false, vertical: true)
+                        .zfont(11).foregroundStyle(Theme.subtext0).fixedSize(horizontal: false, vertical: true)
                 }
                 group("Keyboard shortcuts") { ShortcutTable() }
             }
@@ -806,22 +834,22 @@ private struct SettingsPane: View {
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).zfont(13, .semibold).foregroundStyle(Mocha.lavender)
+            Text(title).zfont(13, .semibold).foregroundStyle(Theme.lavender)
             content()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
+        .background(Theme.mantle, in: RoundedRectangle(cornerRadius: 10))
     }
 
     /// `granted` nil means unknown or not asked yet. With `request`, the button asks macOS directly.
     private func permission(_ name: String, detail: String, granted: Bool?, pane: String, request: (() -> Void)? = nil) -> some View {
         HStack {
             Image(systemName: granted == true ? "checkmark.circle.fill" : granted == false ? "xmark.circle.fill" : "questionmark.circle")
-                .foregroundStyle(granted == true ? Mocha.green : granted == false ? Mocha.red : Mocha.subtext0)
+                .foregroundStyle(granted == true ? Theme.green : granted == false ? Theme.red : Theme.subtext0)
             VStack(alignment: .leading) {
                 Text(name)
-                Text(detail).zfont(11).foregroundStyle(Mocha.subtext0)
+                Text(detail).zfont(11).foregroundStyle(Theme.subtext0)
             }
             Spacer()
             if let request, granted != true {
@@ -857,13 +885,57 @@ private struct SettingsPane: View {
     }
 }
 
+/// A theme drawn in its own colors, so the choice is visible before picking it.
+private struct ThemeSwatch: View {
+    let palette: Palette
+    let selected: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                ForEach([palette.mauve, palette.blue, palette.green, palette.yellow, palette.red], id: \.self) { hex in
+                    Circle().fill(Color(hex: hex)).frame(width: 10, height: 10)
+                        .shadow(color: palette.glows ? Color(hex: hex).opacity(0.9) : .clear, radius: 4)
+                }
+            }
+            Text(palette.name).zfont(12, .medium).foregroundStyle(Color(hex: palette.text)).lineLimit(1)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(hex: palette.base), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(selected ? Theme.mauve : Color(hex: palette.surface1), lineWidth: selected ? 2 : 1))
+        .contentShape(Rectangle())
+    }
+}
+
+/// Neon only: two soft lights drifting behind the sidebar. Still when Reduce Motion is on.
+private struct NeonAmbient: View {
+    @State private var drift = false
+
+    var body: some View {
+        GeometryReader { g in
+            ZStack {
+                Circle().fill(Theme.mauve.opacity(0.22)).frame(width: 220).blur(radius: 70)
+                    .position(x: g.size.width * (drift ? 0.85 : 0.15), y: g.size.height * (drift ? 0.3 : 0.08))
+                Circle().fill(Theme.lavender.opacity(0.15)).frame(width: 240).blur(radius: 80)
+                    .position(x: g.size.width * (drift ? 0.15 : 0.8), y: g.size.height * (drift ? 0.75 : 0.95))
+            }
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+            withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) { drift = true }
+        }
+    }
+}
+
 private struct ShortcutTable: View {
     var body: some View {
         Grid(alignment: .leading, verticalSpacing: 8) {
             ForEach(shortcutList, id: \.action) { s in
                 GridRow {
                     KeyChip(s.keys)
-                    Text(s.action).foregroundStyle(Mocha.subtext0)
+                    Text(s.action).foregroundStyle(Theme.subtext0)
                 }
             }
         }
@@ -899,7 +971,7 @@ private struct CommandPalette: View {
                 .onKeyPress(.downArrow) { index = min(index + 1, max(matches.count - 1, 0)); return .handled }
                 .onKeyPress(.upArrow) { index = max(index - 1, 0); return .handled }
                 .onSubmit(runSelected)
-            Divider().overlay(Mocha.surface1)
+            Divider().overlay(Theme.surface1)
             ScrollView {
                 VStack(spacing: 2) {
                     ForEach(Array(matches.enumerated()), id: \.element.id) { i, c in
@@ -909,7 +981,7 @@ private struct CommandPalette: View {
                             if !c.hint.isEmpty { KeyChip(c.hint) }
                         }
                         .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(i == index ? Mocha.surface0 : .clear, in: RoundedRectangle(cornerRadius: 6))
+                        .background(i == index ? Theme.surface0 : .clear, in: RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle())
                         .onTapGesture { index = i; runSelected() }
                     }
@@ -919,8 +991,8 @@ private struct CommandPalette: View {
             .frame(height: 280)
         }
         .frame(width: 520 * zoom)
-        .background(Mocha.mantle)
-        .foregroundStyle(Mocha.text)
+        .background(Theme.mantle)
+        .foregroundStyle(Theme.text)
         .onAppear { focused = true }
         .onExitCommand(perform: dismiss)
     }
@@ -938,14 +1010,14 @@ private struct HelpSheet: View {
     @Environment(\.zoom) private var zoom
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Keyboard shortcuts").zfont(17, .bold).foregroundStyle(Mocha.mauve)
+            Text("Keyboard shortcuts").zfont(17, .bold).foregroundStyle(Theme.mauve)
             ShortcutTable()
             HStack { Spacer(); Button("Close", action: dismiss).keyboardShortcut(.cancelAction) }
         }
         .padding(24)
         .frame(width: 440 * zoom)
-        .background(Mocha.mantle)
-        .foregroundStyle(Mocha.text)
+        .background(Theme.mantle)
+        .foregroundStyle(Theme.text)
     }
 }
 
@@ -964,7 +1036,7 @@ final class DashboardWindow: NSObject, NSWindowDelegate {
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
             w.appearance = NSAppearance(named: .darkAqua)
-            w.backgroundColor = NSColor(Mocha.base)
+            w.backgroundColor = NSColor(Theme.base)
             w.minSize = NSSize(width: 820, height: 520)
             let host = NSHostingView(rootView: Dashboard(store: store, actions: actions))
             // The window keeps the size the user gives it; long transcripts scroll instead of growing it.
