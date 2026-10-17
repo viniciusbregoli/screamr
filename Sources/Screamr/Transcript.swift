@@ -12,11 +12,18 @@ enum Transcript {
 
     struct Segment: Equatable {
         let speakerID: String
-        let speaker: String
+        var speaker: String
         let start: Double
         var end: Double
         var text: String
+        /// "mic" or "system", set by `merged`.
+        var channel = ""
+
+        /// Identifies this line for a per-line correction, e.g. "mic:12.34".
+        var lineKey: String { Transcript.lineKey(channel, start) }
     }
+
+    static func lineKey(_ channel: String, _ start: Double) -> String { "\(channel):\(String(format: "%.2f", start))" }
 
     /// A pause this long starts a new segment, so replies from the other channel interleave in order.
     static let pauseBreak = 1.0
@@ -62,16 +69,26 @@ enum Transcript {
         return out
     }
 
-    /// Both channels as one conversation, in time order.
+    /// Both channels as one conversation, in time order. A "line:<channel>:<start>" label overrides
+    /// who said that one line (a correction made by hand when Scribe merged two voices).
     static func merged(mic: [Word], system: [Word], labels: [String: String]) -> [Segment] {
-        let micSegments = segments(mic) { id, i, n in labels["mic:\(id)"] ?? micName(id, i, n) }
-        let systemSegments = segments(system) { id, i, n in labels["system:\(id)"] ?? systemName(id, i, n) }
+        func tag(_ segments: [Segment], _ channel: String) -> [Segment] {
+            segments.map { s in
+                var s = s
+                s.channel = channel
+                if let who = labels["line:\(s.lineKey)"] { s.speaker = who }
+                return s
+            }
+        }
+        let micSegments = tag(segments(mic) { id, i, n in labels["mic:\(id)"] ?? micName(id, i, n) }, "mic")
+        let systemSegments = tag(segments(system) { id, i, n in labels["system:\(id)"] ?? systemName(id, i, n) }, "system")
         return (micSegments + systemSegments).sorted { $0.start < $1.start }
     }
 
     /// `names` overrides labels for recognized people, keyed "mic:speaker_0" / "system:speaker_1".
     static func markdown(title: String, mic: [Word], system: [Word], names: [String: String] = [:], fix: (String) -> String = { $0 }) -> String {
-        let all = merged(mic: mic, system: system, labels: labels(mic: mic, system: system, names: names))
+        let lines = names.filter { $0.key.hasPrefix("line:") }
+        let all = merged(mic: mic, system: system, labels: labels(mic: mic, system: system, names: names).merging(lines) { a, _ in a })
         var md = "# \(title)\n\n"
         if all.isEmpty { md += "_No speech detected._\n" }
         for s in all {
