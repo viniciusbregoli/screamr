@@ -11,7 +11,7 @@ struct ScreamrApp: App {
             HomeView()
                 .environment(library)
                 .environment(recorder)
-                .tint(Mocha.mauve)
+                .tint(Theme.mauve)
                 .preferredColorScheme(.dark)
         }
     }
@@ -29,13 +29,13 @@ struct HomeView: View {
             List {
                 ForEach(library.meetings) { m in
                     NavigationLink(value: m) { MeetingRow(meeting: m) }
-                        .listRowBackground(Mocha.surface0)
+                        .listRowBackground(Theme.surface0)
                         .deleteDisabled(m == recorder.folder)
                 }
                 .onDelete { $0.map { library.meetings[$0] }.forEach(library.delete) }
             }
             .scrollContentBackground(.hidden)
-            .background(Mocha.base)
+            .background(Theme.base)
             .refreshable { await sync() }
             .overlay {
                 if library.meetings.isEmpty {
@@ -67,11 +67,11 @@ struct HomeView: View {
             if recorder.folder != nil {
                 TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                     HStack(spacing: 10) {
-                        Circle().fill(Mocha.red).frame(width: 8, height: 8)
-                        Text(clock(recorder.elapsed)).monospacedDigit().foregroundStyle(Mocha.text)
-                        Capsule().fill(Mocha.surface0)
+                        Circle().fill(Theme.red).frame(width: 8, height: 8)
+                        Text(clock(recorder.elapsed)).monospacedDigit().foregroundStyle(Theme.text)
+                        Capsule().fill(Theme.surface0)
                             .overlay(alignment: .leading) {
-                                GeometryReader { g in Capsule().fill(Mocha.green).frame(width: g.size.width * CGFloat(recorder.level)) }
+                                GeometryReader { g in Capsule().fill(Theme.green).frame(width: g.size.width * CGFloat(recorder.level)) }
                             }
                             .frame(width: 120, height: 6)
                     }
@@ -81,8 +81,8 @@ struct HomeView: View {
                 Image(systemName: recorder.folder == nil ? "mic.fill" : "stop.fill")
                     .font(.title)
                     .frame(width: 72, height: 72)
-                    .background(Circle().fill(recorder.folder == nil ? Mocha.mauve : Mocha.red))
-                    .foregroundStyle(Mocha.crust)
+                    .background(Circle().fill(recorder.folder == nil ? Theme.mauve : Theme.red))
+                    .foregroundStyle(Theme.crust)
             }
             .accessibilityLabel(recorder.folder == nil ? "Start recording" : "Stop recording")
             .keyboardShortcut("r", modifiers: .command)
@@ -90,7 +90,7 @@ struct HomeView: View {
         }
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
-        .background(Mocha.mantle)
+        .background(Theme.mantle)
     }
 
     private func toggle() {
@@ -121,18 +121,18 @@ struct MeetingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(meeting.title).foregroundStyle(Mocha.text)
+            Text(meeting.title).foregroundStyle(Theme.text)
             Group {
                 if meeting == recorder.folder {
-                    Label("Recording", systemImage: "record.circle").foregroundStyle(Mocha.red)
+                    Label("Recording", systemImage: "record.circle").foregroundStyle(Theme.red)
                 } else if library.transcribing.contains(meeting.dir) {
-                    Label("Transcribing", systemImage: "ellipsis").foregroundStyle(Mocha.yellow)
+                    Label("Transcribing", systemImage: "ellipsis").foregroundStyle(Theme.yellow)
                 } else if library.errors[meeting.dir] != nil {
-                    Label("Transcription failed", systemImage: "exclamationmark.triangle").foregroundStyle(Mocha.red)
+                    Label("Transcription failed", systemImage: "exclamationmark.triangle").foregroundStyle(Theme.red)
                 } else if let first = meeting.segments.first {
-                    Text(first.text).lineLimit(2).foregroundStyle(Mocha.subtext0)
+                    Text(first.text).lineLimit(2).foregroundStyle(Theme.subtext0)
                 } else {
-                    Text(meeting.isTranscribed ? "No speech detected" : "Not transcribed").foregroundStyle(Mocha.overlay0)
+                    Text(meeting.isTranscribed ? "No speech detected" : "Not transcribed").foregroundStyle(Theme.overlay0)
                 }
             }
             .font(.subheadline)
@@ -146,7 +146,7 @@ struct MeetingView: View {
     @Environment(MeetingRecorder.self) private var recorder
     let meeting: MeetingFolder
 
-    private static let colors = [Mocha.mauve, Mocha.peach, Mocha.teal, Mocha.pink, Mocha.blue, Mocha.yellow, Mocha.green, Mocha.lavender]
+    private static let colors = [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender]
 
     var body: some View {
         let segments = library.transcribing.contains(meeting.dir) ? [] : meeting.segments
@@ -157,16 +157,16 @@ struct MeetingView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(s.speaker).bold().foregroundStyle(color(s.speakerID))
-                            Text(clock(s.start)).monospacedDigit().foregroundStyle(Mocha.overlay0)
+                            Text(clock(s.start)).monospacedDigit().foregroundStyle(Theme.overlay0)
                         }
                         .font(.subheadline)
-                        Text(s.text).foregroundStyle(Mocha.text).textSelection(.enabled)
+                        Text(s.text).foregroundStyle(Theme.text).textSelection(.enabled)
                     }
                 }
             }
             .padding()
         }
-        .background(Mocha.base)
+        .background(Theme.base)
         .overlay { if segments.isEmpty { status } }
         .navigationTitle(meeting.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -181,7 +181,7 @@ struct MeetingView: View {
         if meeting == recorder.folder {
             ContentUnavailableView("Recording", systemImage: "record.circle", description: Text("The transcript appears here after you stop."))
         } else if library.transcribing.contains(meeting.dir) {
-            ProgressView("Transcribing").tint(Mocha.mauve)
+            ProgressView("Transcribing").tint(Theme.mauve)
         } else if meeting.isTranscribed {
             ContentUnavailableView("No speech detected", systemImage: "waveform.slash")
         } else if !meeting.hasAudio {
@@ -225,7 +225,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Stored in the iOS Keychain. Scribe bills about 18 credits per minute of recording.")
                 }
-                .listRowBackground(Mocha.surface0)
+                .listRowBackground(Theme.surface0)
                 Section {
                     TextField("Server URL", text: $syncURL)
                         .textInputAutocapitalization(.never)
@@ -240,10 +240,10 @@ struct SettingsView: View {
                 } footer: {
                     Text(library.syncStatus.isEmpty ? "Meetings sync with the Mac through your sync server, over Tailscale." : library.syncStatus)
                 }
-                .listRowBackground(Mocha.surface0)
+                .listRowBackground(Theme.surface0)
             }
             .scrollContentBackground(.hidden)
-            .background(Mocha.base)
+            .background(Theme.base)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Done", action: save).keyboardShortcut(.defaultAction) }

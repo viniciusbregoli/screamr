@@ -92,27 +92,27 @@ struct FlowBarView: View {
                     if model.mode == .transcribing { dots(t) } else { bars(t) }
                 }
                 .frame(width: 96, height: 30)
-                .background(Capsule().fill(Mocha.crust.opacity(0.94)))
-                .overlay(Capsule().strokeBorder(model.mode == .locked ? Mocha.mauve : Mocha.surface1, lineWidth: 1))
+                .background(Capsule().fill(Theme.crust.opacity(0.94)))
+                .overlay(Capsule().strokeBorder(model.mode == .locked || Theme.glows ? Theme.mauve : Theme.surface1, lineWidth: 1).glow(Theme.mauve, radius: 5))
             }
         }
-        .padding(6) // room for the shadow
+        .padding(Theme.glows ? 14 : 6) // room for the shadow, and the wider neon glow
     }
 
     private func note(_ title: String, _ detail: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "character.book.closed.fill")
                 .font(.system(size: 15))
-                .foregroundStyle(Mocha.mauve)
+                .foregroundStyle(Theme.mauve)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Mocha.mauve)
-                Text(detail).font(.system(size: 13, weight: .medium)).foregroundStyle(Mocha.text)
+                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.mauve)
+                Text(detail).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Mocha.crust.opacity(0.96)))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Mocha.surface1, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.crust.opacity(0.96)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.glows ? Theme.mauve : Theme.surface1, lineWidth: 1).glow(Theme.mauve, radius: 5))
     }
 
     /// Each bar rides its own slow wave, scaled by the live level, so silence is a flat line.
@@ -122,7 +122,8 @@ struct FlowBarView: View {
             ForEach(0..<9) { i in
                 let wave = 0.55 + 0.45 * sin(t * 9 + Double(i) * 0.8)
                 Capsule()
-                    .fill(model.mode == .locked ? Mocha.mauve : Mocha.text)
+                    .fill(model.mode == .locked ? Theme.mauve : Theme.glows ? Theme.lavender : Theme.text)
+                    .glow(model.mode == .locked ? Theme.mauve : Theme.lavender, radius: 4)
                     .frame(width: 3, height: 3 + 15 * level * CGFloat(wave))
             }
         }
@@ -132,7 +133,7 @@ struct FlowBarView: View {
         HStack(spacing: 6) {
             ForEach(0..<3) { i in
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Mocha.text)
+                    .fill(Theme.text)
                     .frame(width: 6, height: 6)
                     .opacity(0.3 + 0.7 * max(0, sin(t * 5 - Double(i) * 0.9)))
             }
