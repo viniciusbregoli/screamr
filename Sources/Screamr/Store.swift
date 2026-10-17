@@ -87,6 +87,9 @@ final class Store: ObservableObject {
         dictionary.filter { !$0.replacement.isEmpty }.map { ($0.phrase, $0.replacement) }
     }
 
+    /// The user: whoever is marked as me, or else the "You" screamr names on its own.
+    var me: Person? { people.first { $0.isMe == true } ?? people.first { $0.name == "You" } }
+
     /// Resolves a person by id, following merges.
     func person(_ id: UUID) -> Person? {
         people.first { $0.id == id || $0.mergedIDs.contains(id) }
