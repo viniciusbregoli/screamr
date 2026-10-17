@@ -10,6 +10,8 @@ final class FlowBar {
     final class Model: ObservableObject {
         @Published var mode = Mode.listening
         @Published var visible = false
+        /// A short note shown in place of the bars, such as a word just added to the dictionary.
+        @Published var message: (title: String, detail: String)?
         var level: () -> Float = { 0 }
     }
 
@@ -23,15 +25,32 @@ final class FlowBar {
     }
 
     func show(_ mode: Mode) {
+        model.message = nil
         model.mode = mode
-        guard !model.visible else { return }
-        model.visible = true
+        present()
+    }
+
+    /// Shows a note for a few seconds, unless dictation takes the bar back first.
+    func flash(_ title: String, _ detail: String) {
+        model.message = (title, detail)
+        present()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.model.message?.detail == detail else { return }
+            self.hide()
+        }
+    }
+
+    private func present() {
+        // Messages are wider than the bars, so the panel follows the content.
+        if let host = panel.contentView { panel.setContentSize(host.fittingSize) }
         // On the screen the user is working on, which is where the pointer usually is.
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
         if let frame = screen?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.minY + 16))
         }
+        guard !model.visible else { return }
+        model.visible = true
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { $0.duration = 0.12; panel.animator().alphaValue = 1 }
@@ -66,14 +85,34 @@ struct FlowBarView: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30, paused: !model.visible)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
-            Group {
-                if model.mode == .transcribing { dots(t) } else { bars(t) }
+            if let message = model.message {
+                note(message.title, message.detail)
+            } else {
+                Group {
+                    if model.mode == .transcribing { dots(t) } else { bars(t) }
+                }
+                .frame(width: 96, height: 30)
+                .background(Capsule().fill(Mocha.crust.opacity(0.94)))
+                .overlay(Capsule().strokeBorder(model.mode == .locked ? Mocha.mauve : Mocha.surface1, lineWidth: 1))
             }
-            .frame(width: 96, height: 30)
-            .background(Capsule().fill(Mocha.crust.opacity(0.94)))
-            .overlay(Capsule().strokeBorder(model.mode == .locked ? Mocha.mauve : Mocha.surface1, lineWidth: 1))
         }
         .padding(6) // room for the shadow
+    }
+
+    private func note(_ title: String, _ detail: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "character.book.closed.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(Mocha.mauve)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Mocha.mauve)
+                Text(detail).font(.system(size: 13, weight: .medium)).foregroundStyle(Mocha.text)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Mocha.crust.opacity(0.96)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Mocha.surface1, lineWidth: 1))
     }
 
     /// Each bar rides its own slow wave, scaled by the live level, so silence is a flat line.
