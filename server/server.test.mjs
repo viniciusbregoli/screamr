@@ -95,6 +95,8 @@ test('audio is retired after the retention period and unreferenced blobs are col
     const oldAudio = await put('old audio'), oldWords = await put('[]'), newAudio = await put('new audio')
     const orphan = await put('superseded transcript'), fresh = await put('uploaded, record not posted yet')
     await fetch(`${base()}/records`, { method: 'POST', headers: auth, body: JSON.stringify([
+      // Other kinds of record carry no file manifest and must not stop the collection.
+      { kind: 'setting', id: 'theme', body: 'neon', updated: 1 },
       { kind: 'meeting', id: '2026-10-17 09.00.00', body: JSON.stringify({ 'mic.m4a': oldAudio, 'mic.words.json': oldWords }), updated: 1 },
       { kind: 'meeting', id: '2027-01-14 09.00.00', body: JSON.stringify({ 'mic.m4a': newAudio }), updated: 1 },
     ]) })

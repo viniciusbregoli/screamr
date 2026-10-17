@@ -201,6 +201,7 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
   const collectGarbage = () => {
     const referenced = new Set()
     for (const r of liveRecords.all()) {
+      if (r.kind !== 'meeting') continue // only meetings reference blobs
       const manifest = parseManifest(r.body)
       // A record we can't read might reference anything, so collect nothing rather than guess.
       if (!manifest) return console.error(`garbage collection skipped: record ${r.id} is not a file manifest`)
