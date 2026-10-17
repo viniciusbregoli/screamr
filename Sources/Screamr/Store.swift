@@ -26,6 +26,8 @@ struct MeetingInfo: Identifiable, Hashable {
     var id: URL { dir }
     let dir: URL
     let title: String
+    /// The name the user gave it, if any; lists fall back to the recording date.
+    var name: String? { MeetingTitle.read(dir) }
     var transcript: URL? {
         let url = dir.appendingPathComponent("transcript.md")
         return FileManager.default.fileExists(atPath: url.path) ? url : nil

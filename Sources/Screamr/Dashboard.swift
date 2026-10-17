@@ -37,6 +37,7 @@ let shortcutList: [(keys: String, action: String)] = [
     ("⌘K", "Command palette"),
     ("/", "Search history"),
     ("⌘N", "Add a word or snippet"),
+    ("⌘R", "Rename the selected meeting"),
     ("?", "Show shortcuts"),
     ("⌘+ / ⌘- / ⌘0", "Zoom in, out, reset"),
     ("Esc", "Close palette, help, or this window"),
@@ -52,6 +53,7 @@ struct Dashboard: View {
     @State private var palette = false
     @State private var help = false
     @State private var searchRequest = 0
+    @State private var renameRequest = 0
     @FocusState private var rootFocused: Bool
 
     init(store: Store, actions: DashboardActions, pane: Pane = .home) {
@@ -66,7 +68,7 @@ struct Dashboard: View {
             Group {
                 switch pane {
                 case .home: HomePane(store: store, searchRequest: searchRequest)
-                case .meetings: MeetingsPane(store: store, actions: actions)
+                case .meetings: MeetingsPane(store: store, actions: actions, renameRequest: renameRequest)
                 case .people: PeoplePane(store: store)
                 case .dictionary:
                     PairEditor(items: $store.dictionary, first: \.phrase, second: \.replacement, make: DictionaryEntry.init,
@@ -186,6 +188,7 @@ struct Dashboard: View {
         Pane.allCases.map { p in PaletteCommand(title: "Go to \(p.rawValue)", hint: "⌘\(String(p.key.character))") { pane = p } } + [
             PaletteCommand(title: store.meetingActive ? "Stop meeting recording" : "Start meeting recording", hint: "⌃⌥⌘M", run: actions.toggleMeeting),
             PaletteCommand(title: "Search dictation history", hint: "/") { pane = .home; searchRequest += 1 },
+            PaletteCommand(title: "Rename meeting", hint: "⌘R") { pane = .meetings; renameRequest += 1 },
             PaletteCommand(title: "Open meetings folder", hint: "") {
                 try? FileManager.default.createDirectory(at: Meeting.root, withIntermediateDirectories: true)
                 NSWorkspace.shared.open(Meeting.root)
@@ -434,7 +437,11 @@ private struct AppIcon: View {
 private struct MeetingsPane: View {
     @ObservedObject var store: Store
     let actions: DashboardActions
+    let renameRequest: Int
     @State private var selection: MeetingInfo.ID?
+    @State private var renaming = false
+    @State private var draft = ""
+    @FocusState private var titleFocused: Bool
     /// Bumped after a correction, since a line fix rewrites files without changing the store.
     @State private var edits = 0
     @Environment(\.zoom) private var zoom
@@ -457,7 +464,7 @@ private struct MeetingsPane: View {
                 HStack(alignment: .top, spacing: 16) {
                     List(store.meetings, selection: $selection) { m in
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(m.date?.formatted(date: .abbreviated, time: .shortened) ?? m.title).zfont(13, .medium)
+                            Text(m.name ?? m.date?.formatted(date: .abbreviated, time: .shortened) ?? m.title).zfont(13, .medium)
                             Group {
                                 if m.transcript == nil {
                                     Label("Not transcribed", systemImage: "exclamationmark.circle").foregroundStyle(Theme.yellow)
@@ -481,6 +488,24 @@ private struct MeetingsPane: View {
         }
         .panePadding()
         .onAppear { store.refreshMeetings(); selection = selection ?? store.meetings.first?.id }
+        .onChange(of: renameRequest) { startRename() }
+        .onChange(of: selection) { renaming = false }
+    }
+
+    private func startRename() {
+        guard let m = selected else { return }
+        draft = m.name ?? ""
+        renaming = true
+        titleFocused = true
+    }
+
+    /// An empty name clears the title, so the list goes back to showing the date.
+    private func commitRename(_ m: MeetingInfo) {
+        renaming = false
+        try? MeetingTitle.write(draft, to: m.dir)
+        _ = try? Meeting.render(dir: m.dir, title: m.title, store: store)
+        store.refreshMeetings()
+        actions.syncNow()
     }
 
     private var empty: some View {
@@ -498,8 +523,23 @@ private struct MeetingsPane: View {
     private func detail(_ m: MeetingInfo) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(m.date?.formatted(date: .complete, time: .shortened) ?? m.title).zfont(15, .semibold)
+                if renaming {
+                    TextField("Meeting title", text: $draft)
+                        .textFieldStyle(.plain).zfont(15, .semibold)
+                        .focused($titleFocused)
+                        .onSubmit { commitRename(m) }
+                        .onKeyPress(.escape) { renaming = false; return .handled }
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(m.name ?? m.date?.formatted(date: .complete, time: .shortened) ?? m.title).zfont(15, .semibold)
+                        if m.name != nil, let date = m.date {
+                            Text(date.formatted(date: .complete, time: .shortened)).zfont(11).foregroundStyle(Theme.overlay2)
+                        }
+                    }
+                }
                 Spacer()
+                Button { startRename() } label: { HStack(spacing: 4) { Text("Rename"); KeyChip("⌘R") } }
+                    .keyboardShortcut("r", modifiers: .command)
                 Button(m.transcript == nil ? "Transcribe" : "Re-transcribe") { actions.retranscribe(m) }
                     // Audio is retired 90 days after the meeting; the transcript stays.
                     .disabled(store.transcribingMeeting || !FileManager.default.fileExists(atPath: m.dir.appendingPathComponent("mic.m4a").path))
