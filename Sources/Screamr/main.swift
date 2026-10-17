@@ -13,6 +13,9 @@ final class App: NSObject, NSApplicationDelegate {
     private var stateItem = NSMenuItem(title: "Hold Fn to dictate", action: nil, keyEquivalent: "")
     private lazy var meetingItem = item("Start Meeting Recording", #selector(toggleMeeting), "m", [.control, .option, .command])
     private var meeting: Meeting?
+    private lazy var syncEngine = SyncEngine(root: Meeting.root, stateFile: Store.root.appendingPathComponent("sync-state.json"))
+    private var syncing = false
+    private var transcribingDir: String?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         let menu = NSMenu()
@@ -25,6 +28,8 @@ final class App: NSObject, NSApplicationDelegate {
         status.menu = menu
         setIcon("mic")
         NSApp.mainMenu = mainMenu()
+        syncNow()
+        Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in self?.syncNow() }
 
         // Fn still gets set up without a key, so it works as soon as one is saved in Settings.
         if Store.apiKey() == nil {
@@ -153,12 +158,15 @@ final class App: NSObject, NSApplicationDelegate {
     private func transcribe(_ m: MeetingInfo, includeSystem: Bool, openWhenDone: Bool) {
         guard let key = Store.apiKey() else { return fail("No API key") }
         store.transcribingMeeting = true
+        transcribingDir = m.dir.lastPathComponent
         meetingItem.title = "Transcribing Meeting..."
         meetingItem.isEnabled = false
         store.refreshMeetings()
         Task { @MainActor in
             defer {
                 store.transcribingMeeting = false
+                transcribingDir = nil
+                syncNow()
                 store.refreshMeetings()
                 meetingItem.title = "Start Meeting Recording"
                 meetingItem.isEnabled = true
@@ -179,8 +187,41 @@ final class App: NSObject, NSApplicationDelegate {
             retranscribe: { [weak self] m in
                 let system = m.dir.appendingPathComponent("system.m4a")
                 self?.transcribe(m, includeSystem: FileManager.default.fileExists(atPath: system.path), openWhenDone: false)
+            },
+            syncNow: { [weak self] in self?.syncNow() },
+            meetingDeleted: { [weak self] m in
+                guard let self else { return }
+                Task { @MainActor in
+                    await self.syncEngine.markDeleted(m.dir.lastPathComponent)
+                    self.syncNow()
+                }
             }
         ))
+    }
+
+    /// Pushes local meetings and pulls the iPhone's. Pulled transcripts get speakers recognized here,
+    /// and a second pass sends their labels back.
+    private func syncNow() {
+        guard !syncing, let config = Store.syncConfig() else { return }
+        syncing = true
+        store.syncStatus = "Syncing..."
+        let skip = Set([meeting?.dir.lastPathComponent, transcribingDir].compactMap { $0 })
+        Task { @MainActor in
+            defer { syncing = false }
+            do {
+                var recognized = false
+                for (dir, files) in try await syncEngine.run(config, skip: skip) where files.contains(where: { $0.hasSuffix(".words.json") }) {
+                    await Meeting.identifySpeakers(dir: dir, store: store)
+                    _ = try? Meeting.render(dir: dir, title: "Meeting \(dir.lastPathComponent)", store: store)
+                    recognized = true
+                }
+                if recognized { _ = try await syncEngine.run(config, skip: skip) }
+                store.refreshMeetings()
+                store.syncStatus = "Synced at \(Date().formatted(date: .omitted, time: .shortened))"
+            } catch {
+                store.syncStatus = "Sync failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     /// The dashboard puts screamr in the Dock, so it needs a real menu bar: without an Edit menu,
