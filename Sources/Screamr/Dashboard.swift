@@ -595,6 +595,7 @@ private struct SettingsPane: View {
     @State private var loginError: String?
     @State private var refresh = 0
     @AppStorage(Recorder.inputKey) private var input = ""
+    @AppStorage(CorrectionWatcher.enabledKey) private var learnCorrections = true
 
     var body: some View {
         ScrollView {
@@ -657,6 +658,9 @@ private struct SettingsPane: View {
                             catch { loginError = error.localizedDescription; launchAtLogin = !on }
                         }
                     if let loginError { Text(loginError).zfont(10).foregroundStyle(Mocha.red) }
+                    Toggle("Learn words I correct after dictating", isOn: $learnCorrections)
+                    Text("For 30 seconds after a paste, screamr reads the text field you dictated into. If you retype a misheard name or term, it's added to the Dictionary. The text stays on this Mac.")
+                        .zfont(10).foregroundStyle(Mocha.subtext0).fixedSize(horizontal: false, vertical: true)
                 }
                 group("Keyboard shortcuts") { ShortcutTable() }
             }
