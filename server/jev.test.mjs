@@ -1,13 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { requestBody, summarize, turnsToClassify } from './jev.mjs'
+import { loadRubric } from './rubric.mjs'
 import { start } from './server.mjs'
 
-const rubric = JSON.parse(readFileSync(new URL('./rubric/v1.json', import.meta.url)))
+const rubric = loadRubric()
 const say = (text, speaker, start) => text.split(' ').map((t, i) => ({ text: t, type: 'word', speaker_id: speaker, start: start + i * 0.4, end: start + i * 0.4 + 0.3 }))
 
 test('only the dominant mic speaker turns of three words or more are classified', () => {
@@ -20,7 +21,7 @@ test('a request carries the turn alone, and point_first only for long turns', ()
   const short = requestBody({ text: 'Vou entregar sexta.', words: 3 }, { rubric, language: 'por' })
   assert.deepEqual(Object.keys(short.questions).sort(), ['commitment', 'could_be_better', 'hedge_function', 'style'])
   assert.deepEqual(Object.keys(short.state), ['turn', 'setting', 'language'])
-  assert.equal(short.model, 'jev-1.13.0')
+  assert.equal(short.model, rubric.model)
   assert.equal(JSON.stringify(short).includes('"source"'), false) // citations stay in the rubric file
   const long = requestBody({ text: 'x', words: 41 }, { rubric, language: 'por' })
   assert.ok(long.questions.point_first)
@@ -68,7 +69,7 @@ test('baseline meetings are classified in the background, once per words version
     assert.equal(sent[0].state.language, 'por')
 
     const jev = await fetch(`${base}/jev`, { headers: auth }).then((r) => r.json())
-    assert.equal(jev.rubric_version, 'rubric-v1')
+    assert.equal(jev.rubric_version, rubric.version)
     assert.equal(jev.provisional, true)
     assert.equal(jev.meetings[0].turns.length, 2)
     assert.equal(jev.meetings[0].summary.assertive_share, 1)
