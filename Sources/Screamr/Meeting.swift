@@ -51,6 +51,77 @@ final class Meeting {
         return try render(dir: dir, title: title, store: store)
     }
 
+    /// The time spans of the user's own lines, so the sync server measures the right person even when
+    /// everyone shares one channel (iPhone recordings). Written only once speakers are assigned.
+    private static func writeMe(dir: URL, mic: [Transcript.Word], system: [Transcript.Word], labels: [String: String],
+                                assigned: [String: UUID], lines: [String: UUID], store: Store) throws {
+        let url = dir.appendingPathComponent("me.json")
+        guard let me = store.me?.id, !(assigned.isEmpty && lines.isEmpty) else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        let spans = Transcript.merged(mic: mic, system: system, labels: labels).filter { s in
+            let id = lines[s.lineKey] ?? assigned["\(s.channel):\(s.speakerID)"]
+            return id.flatMap { store.person($0)?.id } == me
+        }
+        .map { ["channel": $0.channel, "start": $0.start, "end": $0.end] as [String: Any] }
+        let data = try JSONSerialization.data(withJSONObject: ["spans": spans], options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url, options: .atomic)
+    }
+
+    static func loadIDs(_ dir: URL, _ file: String) -> [String: UUID] {
+        (try? JSONDecoder().decode([String: UUID].self, from: Data(contentsOf: dir.appendingPathComponent(file)))) ?? [:]
+    }
+
+    private static func saveIDs(_ ids: [String: UUID], _ dir: URL, _ file: String) throws {
+        try JSONEncoder().encode(ids).write(to: dir.appendingPathComponent(file), options: .atomic)
+    }
+
+    /// "Everywhere in this meeting": this speaker was someone else. Moves the meeting's voice sample too,
+    /// so a wrong match stops pulling the old person's voice profile toward someone else.
+    @MainActor
+    static func assign(dir: URL, title: String, speaker key: String, to id: UUID, store: Store) async throws {
+        var assigned = loadIDs(dir, "speakers.json")
+        let meeting = dir.lastPathComponent
+        let old = assigned[key].flatMap { store.person($0)?.id }
+        guard old != id, let target = store.person(id)?.id else { return }
+        assigned[key] = target
+        try saveIDs(assigned, dir, "speakers.json")
+
+        var print: [Float]?
+        if let old, let i = store.people.firstIndex(where: { $0.id == old }) {
+            print = PeopleMatcher.release(meeting: meeting, from: &store.people[i])
+            let stillHere = assigned.values.contains { store.person($0)?.id == old } || loadIDs(dir, "lines.json").values.contains { store.person($0)?.id == old }
+            if !stillHere { store.people[i].meetings.removeAll { $0 == meeting } }
+        }
+        if print == nil {
+            // Older profiles have no per-meeting sample: fingerprint this speaker again from the audio.
+            let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
+            if parts.count == 2, let spans = PeopleMatcher.speakerRanges(loadWords(dir, parts[0]))[parts[1]] {
+                print = try? await VoicePrinter.shared.fingerprint(file: dir.appendingPathComponent("\(parts[0]).m4a"), segments: spans)
+            }
+        }
+        if let j = store.people.firstIndex(where: { $0.id == target }) {
+            if let print { PeopleMatcher.absorb(print, into: &store.people[j], meeting: meeting) }
+            if !store.people[j].meetings.contains(meeting) { store.people[j].meetings.append(meeting) }
+        }
+        _ = try render(dir: dir, title: title, store: store)
+    }
+
+    /// "This line": one line was someone else, typically where Scribe merged two voices into one speaker.
+    /// Too short to fingerprint reliably, so voice profiles stay as they are. `nil` removes the correction.
+    @MainActor
+    static func assign(dir: URL, title: String, line key: String, to id: UUID?, store: Store) throws {
+        var lines = loadIDs(dir, "lines.json")
+        lines[key] = id.flatMap { store.person($0)?.id }
+        try saveIDs(lines, dir, "lines.json")
+        if let id, let j = store.people.firstIndex(where: { $0.id == store.person(id)?.id }),
+           !store.people[j].meetings.contains(dir.lastPathComponent) {
+            store.people[j].meetings.append(dir.lastPathComponent)
+        }
+        _ = try render(dir: dir, title: title, store: store)
+    }
+
     /// Fingerprints each diarized speaker and matches them to known people, creating new ones as needed.
     /// Best effort: if the voice model can't load (first run offline), the transcript just keeps generic labels.
     @MainActor
@@ -71,7 +142,7 @@ final class Meeting {
                 let quote = excerpt(segments.filter { $0.speakerID == speaker }.max { $0.text.count < $1.text.count }?.text ?? "")
                 let meeting = dir.lastPathComponent
                 if let i = PeopleMatcher.match(voice, in: store.people) {
-                    PeopleMatcher.absorb(voice, into: &store.people[i])
+                    PeopleMatcher.absorb(voice, into: &store.people[i], meeting: meeting)
                     if !store.people[i].meetings.contains(meeting) { store.people[i].meetings.append(meeting) }
                     store.people[i].lastSeen = Date()
                     if store.people[i].quote.isEmpty { store.people[i].quote = quote }
@@ -80,7 +151,8 @@ final class Meeting {
                     // A lone voice on the mic is almost always the user, so start them off named.
                     let isUser = channel == "mic" && ranges.count == 1 && !store.people.contains { $0.name == "You" }
                     let person = Person(number: (store.people.map(\.number).max() ?? 0) + 1, name: isUser ? "You" : "",
-                                        voice: voice, meetings: [meeting], quote: quote)
+                                        voice: voice, meetings: [meeting], quote: quote,
+                                        isMe: isUser && store.me == nil ? true : nil, prints: [meeting: voice])
                     store.people.append(person)
                     assigned["\(channel):\(speaker)"] = person.id
                 }
@@ -93,13 +165,16 @@ final class Meeting {
     @MainActor
     @discardableResult
     static func render(dir: URL, title: String, store: Store) throws -> URL {
-        let assigned = (try? JSONDecoder().decode([String: UUID].self, from: Data(contentsOf: dir.appendingPathComponent("speakers.json")))) ?? [:]
-        let names = assigned.compactMapValues { store.person($0)?.displayName }
+        let assigned = loadIDs(dir, "speakers.json")
+        let lines = loadIDs(dir, "lines.json")
+        var names = assigned.compactMapValues { store.person($0)?.displayName }
+        for (line, id) in lines { names["line:\(line)"] = store.person(id)?.displayName }
         let rules = store.replacements
         let mic = loadWords(dir, "mic"), system = loadWords(dir, "system")
-        // Other devices have no people database, so they read the final labels from here.
-        let labels = Transcript.labels(mic: mic, system: system, names: names)
+        // Other devices have no people database, so they read the final labels, line corrections included, from here.
+        let labels = Transcript.labels(mic: mic, system: system, names: names).merging(names.filter { $0.key.hasPrefix("line:") }) { a, _ in a }
         try JSONEncoder().encode(labels).write(to: dir.appendingPathComponent("names.json"), options: .atomic)
+        try writeMe(dir: dir, mic: mic, system: system, labels: labels, assigned: assigned, lines: lines, store: store)
         let md = Transcript.markdown(title: title, mic: mic, system: system, names: names) {
             TextRules.apply($0, replacements: rules)
         }
