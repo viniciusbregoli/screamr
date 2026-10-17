@@ -13,24 +13,68 @@ enum Scribe {
         let language_code: String?
     }
 
+    static let model = "scribe_v2"
+
+    /// Verbatim keeps fillers ("um", "é", "hum") and false starts; clean (`no_verbatim`) drops them.
+    /// Dictation defaults to clean, since the text gets pasted; meetings default to verbatim, since
+    /// they are the data for speech analysis and fillers are part of what gets measured.
+    static let dictationVerbatimKey = "dictationVerbatim"
+    static let meetingVerbatimKey = "meetingVerbatim"
+    static var dictationVerbatim: Bool { UserDefaults.standard.object(forKey: dictationVerbatimKey) as? Bool ?? false }
+    static var meetingVerbatim: Bool { UserDefaults.standard.object(forKey: meetingVerbatimKey) as? Bool ?? true }
+
+    /// One transcribed meeting channel and the language Scribe settled on for it.
+    struct Channel {
+        let words: [Transcript.Word]
+        let language: String?
+    }
+
+    /// How a meeting was transcribed, saved as meta.json next to its words so analysis can filter on it
+    /// and never mixes verbatim and clean transcripts.
+    struct Meta: Codable, Equatable {
+        var transcription_mode: String
+        var model_id: String
+        var transcribed_at: Date
+        /// Channel ("mic", "system") to Scribe's language code, e.g. "por".
+        var languages: [String: String]
+
+        init(verbatim: Bool, languages: [String: String], at date: Date = Date()) {
+            transcription_mode = verbatim ? "verbatim" : "clean"
+            model_id = Scribe.model
+            transcribed_at = date
+            self.languages = languages
+        }
+
+        func write(to dir: URL) throws {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(self).write(to: dir.appendingPathComponent("meta.json"), options: .atomic)
+        }
+    }
+
     /// Scribe takes one language or detects among ~99; the user speaks only English and Portuguese, mixed.
     static let languages: Set = ["eng", "por"]
     /// Portuguese tends to be misheard as one of these, especially in short takes.
     private static let nearPortuguese: Set = ["spa", "glg", "cat", "ita", "fra", "ron"]
 
-    static func transcribe(wav: Data, apiKey: String, keyterms: [String] = []) async throws -> String {
-        let fields = keyterms.map { ("keyterms", $0) }
+    static func transcribe(wav: Data, apiKey: String, keyterms: [String] = [], verbatim: Bool = dictationVerbatim) async throws -> String {
+        let fields = formFields(verbatim: verbatim) + keyterms.map { ("keyterms", $0) }
         let r = try await request(audio: wav, filename: "take.wav", mime: "audio/wav", fields: fields, apiKey: apiKey, timeout: 30)
         return r.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Diarized, word-timestamped transcription of a recorded meeting channel.
-    static func words(file: URL, apiKey: String, keyterms: [String] = []) async throws -> [Transcript.Word] {
+    static func words(file: URL, apiKey: String, keyterms: [String] = [], verbatim: Bool = meetingVerbatim) async throws -> Channel {
         let audio = try Data(contentsOf: file)
-        let fields = [("diarize", "true"), ("timestamps_granularity", "word")] + keyterms.map { ("keyterms", $0) }
+        let fields = formFields(verbatim: verbatim) + [("diarize", "true"), ("timestamps_granularity", "word")] + keyterms.map { ("keyterms", $0) }
         // ponytail: one synchronous request per channel; long meetings may need Scribe's webhook mode.
         let r = try await request(audio: audio, filename: file.lastPathComponent, mime: "audio/mp4", fields: fields, apiKey: apiKey, timeout: 900)
-        return r.words ?? []
+        return Channel(words: r.words ?? [], language: r.language_code)
+    }
+
+    static func formFields(verbatim: Bool) -> [(String, String)] {
+        [("model_id", model), ("no_verbatim", verbatim ? "false" : "true"), ("tag_audio_events", "false")]
     }
 
     /// Auto-detects so mixed English/Portuguese speech stays intact; if detection lands on another
@@ -53,10 +97,6 @@ enum Scribe {
         func field(_ name: String, _ value: String) {
             body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".data(using: .utf8)!)
         }
-        field("model_id", "scribe_v2")
-        // Drops fillers and false starts, which is most of what Wispr's cleanup pass does.
-        field("no_verbatim", "true")
-        field("tag_audio_events", "false")
         for (name, value) in fields { field(name, value) }
         body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
         body.append(audio)
