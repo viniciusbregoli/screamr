@@ -4,15 +4,34 @@
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { computeMetrics, METRICS_VERSION } from './metrics.mjs'
 import { classify, summarize, turnsToClassify } from './jev.mjs'
 import { loadRubric } from './rubric.mjs'
 
+export const RETIRED = 'retired'
+const AUDIO = ['mic.m4a', 'system.m4a']
+
+/** A meeting's files, `{ name: sha256 | "retired" }`, or null when the body isn't one. */
+export function parseManifest(body) {
+  try {
+    const m = JSON.parse(body)
+    return m && typeof m === 'object' && !Array.isArray(m) && Object.values(m).every((v) => typeof v === 'string') ? m : null
+  } catch {
+    return null
+  }
+}
+
+/** A meeting's recording time from its folder name, "yyyy-MM-dd HH.mm.ss" (older ones without seconds), in local time. */
+export function meetingDate(id) {
+  const m = id.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2})\.(\d{2})(?:\.(\d{2}))?$/)
+  return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] ?? 0)).getTime() : null
+}
+
 const defaultLexicon = () => JSON.parse(readFileSync(new URL('./lexicon/v1.json', import.meta.url)))
 
-export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = defaultLexicon(), rubric = loadRubric(), jevKey = process.env.TYPESAFE_API_KEY, jevFetch = fetch }) {
+export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = defaultLexicon(), rubric = loadRubric(), jevKey = process.env.TYPESAFE_API_KEY, jevFetch = fetch, retentionDays = 90, now = Date.now }) {
   if (!token) throw new Error('SCREAMR_SYNC_TOKEN missing')
   const blobs = join(dataDir, 'blobs')
   const tmp = join(dataDir, 'tmp')
@@ -155,6 +174,59 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
   })
   const blobPath = (hash) => join(blobs, hash.slice(0, 2), hash)
 
+  // Meeting audio carries everyone's voices, biometric data under LGPD, so it's kept for retentionDays from the
+  // recording date and then retired: the server writes RETIRED in place of the hash, which devices treat as final
+  // (they delete their copy and never re-upload it). The server writes it because it's always on and knows every
+  // meeting's date, while devices can be offline for months. Transcripts stay.
+  const liveRecords = db.prepare('SELECT kind, id, body, updated FROM records WHERE deleted = 0')
+  const retireAudio = () => {
+    const cutoff = now() - retentionDays * 86_400_000
+    for (const r of liveRecords.all()) {
+      if (r.kind !== 'meeting') continue
+      const recorded = meetingDate(r.id)
+      if (recorded == null || recorded > cutoff) continue
+      const manifest = parseManifest(r.body)
+      if (!manifest) {
+        console.error(`retention skipped ${r.id}: its record is not a file manifest`)
+        continue
+      }
+      const audio = AUDIO.filter((f) => manifest[f] && manifest[f] !== RETIRED)
+      if (!audio.length) continue
+      for (const f of audio) manifest[f] = RETIRED
+      upsert.run('meeting', r.id, JSON.stringify(manifest), Math.max(now() / 1000, r.updated + 0.001), 0)
+    }
+  }
+  // Then deletes blobs no live record references: retired audio, deleted meetings, superseded versions.
+  // Only blobs older than a day, since devices upload a meeting's files before posting its record.
+  const collectGarbage = () => {
+    const referenced = new Set()
+    for (const r of liveRecords.all()) {
+      const manifest = parseManifest(r.body)
+      // A record we can't read might reference anything, so collect nothing rather than guess.
+      if (!manifest) return console.error(`garbage collection skipped: record ${r.id} is not a file manifest`)
+      for (const v of Object.values(manifest)) referenced.add(v)
+    }
+    // An empty or broken database must never read as "nothing is referenced".
+    if (!referenced.size) return
+    const youngest = now() - 86_400_000
+    for (const dir of readdirSync(blobs)) {
+      for (const hash of readdirSync(join(blobs, dir))) {
+        const path = join(blobs, dir, hash)
+        if (!referenced.has(hash) && statSync(path).mtimeMs < youngest) rmSync(path, { force: true })
+      }
+    }
+  }
+  const retention = () => {
+    try {
+      retireAudio()
+      collectGarbage()
+    } catch (e) {
+      console.error(`retention failed: ${e.message}`)
+    }
+  }
+  retention()
+  const retentionTimer = setInterval(retention, 86_400_000)
+
   // Catch up on meetings synced before this metric or word-list version.
   const stale = db.prepare("SELECT r.id FROM records r LEFT JOIN metrics m ON m.meeting = r.id WHERE r.kind = 'meeting' AND r.deleted = 0 AND (m.version IS NULL OR m.version != ?)")
   for (const { id } of stale.all(metricsVersion)) updateMetrics(id)
@@ -203,6 +275,10 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
           for (const r of records) {
             if (typeof r.kind !== 'string' || typeof r.id !== 'string' || typeof r.body !== 'string' || typeof r.updated !== 'number') {
               throw new Error('record needs kind, id, body (string) and updated (number)')
+            }
+            // Retention and garbage collection read every meeting's manifest, so a broken one is refused here.
+            if (r.kind === 'meeting' && !r.deleted && !parseManifest(r.body)) {
+              throw new Error(`meeting ${r.id}: body must be a JSON object of file names to hashes`)
             }
             upsert.run(r.kind, r.id, r.body, r.updated, r.deleted ? 1 : 0)
           }
@@ -265,7 +341,7 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
       port: server.address().port,
       /** Resolves once queued Jev classifications finish (tests and graceful shutdown). */
       jevIdle: () => jevDrain,
-      close: () => new Promise((done) => { clearInterval(timer); server.close(() => jevDrain.finally(() => { db.close(); done() })) }),
+      close: () => new Promise((done) => { clearInterval(timer); clearInterval(retentionTimer); server.close(() => jevDrain.finally(() => { db.close(); done() })) }),
     }))
   })
 }
