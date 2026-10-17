@@ -118,7 +118,9 @@ final class CorrectionWatcher {
 
     private static func focused(_ app: AXUIElement) -> AXUIElement? {
         var value: AnyObject?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value) == .success else { return nil }
+        // Some apps answer with something other than an element; checking the type keeps a cast from crashing screamr.
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return (value as! AXUIElement)
     }
 
