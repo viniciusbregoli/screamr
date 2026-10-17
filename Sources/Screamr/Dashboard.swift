@@ -104,20 +104,24 @@ struct Dashboard: View {
     private func zoom(by step: Double) { zoom = min(max((zoom + step) * 10, 8), 20).rounded() / 10 }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("screamr").zfont(17, .bold).foregroundStyle(Mocha.mauve).padding(.horizontal, 10).padding(.bottom, 12)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 22, height: 22)
+                Text("screamr").zfont(15, .semibold)
+            }
+            .padding(.horizontal, 8).padding(.bottom, 14)
             ForEach(Pane.allCases) { p in
                 Button { pane = p } label: {
-                    HStack {
-                        Image(systemName: p.icon).frame(width: 20)
+                    HStack(spacing: 10) {
+                        Image(systemName: p.icon).zfont(13).frame(width: 18).foregroundStyle(pane == p ? Mocha.mauve : Mocha.overlay2)
                         Text(p.rawValue)
                         Spacer()
                         KeyChip("⌘\(String(p.key.character))")
                             .opacity(command.held ? 1 : 0)
                             .animation(.easeOut(duration: 0.12), value: command.held)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(pane == p ? Mocha.surface0 : .clear, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .background(pane == p ? Mocha.surface0 : .clear, in: RoundedRectangle(cornerRadius: 7))
                     .foregroundStyle(pane == p ? Mocha.text : Mocha.subtext0)
                     .contentShape(Rectangle())
                 }
@@ -125,21 +129,25 @@ struct Dashboard: View {
             }
             Spacer()
             Button(action: actions.toggleMeeting) {
-                Label(store.transcribingMeeting ? "Transcribing..." : store.meetingActive ? "Stop meeting" : "Record meeting",
-                      systemImage: store.meetingActive ? "stop.circle.fill" : "record.circle")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(store.meetingActive ? Mocha.red : Mocha.surface0, in: RoundedRectangle(cornerRadius: 8))
-                    .foregroundStyle(store.meetingActive ? Mocha.crust : Mocha.text)
+                HStack(spacing: 8) {
+                    Image(systemName: store.meetingActive ? "stop.fill" : "circle.fill")
+                        .zfont(store.meetingActive ? 10 : 9)
+                        .foregroundStyle(store.meetingActive ? Mocha.crust : Mocha.red)
+                    Text(store.transcribingMeeting ? "Transcribing..." : store.meetingActive ? "Stop meeting" : "Record meeting")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(store.meetingActive ? Mocha.red : Mocha.surface0, in: RoundedRectangle(cornerRadius: 8))
+                .foregroundStyle(store.meetingActive ? Mocha.crust : Mocha.text)
             }
             .buttonStyle(.plain)
             .disabled(store.transcribingMeeting)
             .help("⌃⌥⌘M")
-            HStack { KeyChip("⌘K"); Text("commands"); Spacer(); KeyChip("?"); Text("help") }
-                .zfont(10).foregroundStyle(Mocha.overlay0).padding(.top, 6)
+            HStack(spacing: 6) { KeyChip("⌘K"); Text("Commands"); Spacer(); KeyChip("?"); Text("Help") }
+                .zfont(11).foregroundStyle(Mocha.overlay2).padding(.top, 10).padding(.horizontal, 2)
         }
         .padding(12)
-        .padding(.top, 24)
+        .padding(.top, 6)
         .frame(width: 210 * zoom)
         .background(Mocha.mantle)
     }
@@ -230,7 +238,7 @@ struct MochaButton: ButtonStyle {
 }
 
 /// Plain text fields otherwise draw their placeholder in the same color as typed text.
-func placeholder(_ text: String) -> Text { Text(text).foregroundColor(Mocha.overlay0) }
+func placeholder(_ text: String) -> Text { Text(text).foregroundColor(Mocha.overlay2) }
 
 struct KeyChip: View {
     let label: String
@@ -247,11 +255,16 @@ private struct PaneHeader: View {
     let title: String
     var blurb: String? = nil
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).zfont(26, .bold)
-            if let blurb { Text(blurb).foregroundStyle(Mocha.subtext0) }
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).zfont(22, .bold)
+            if let blurb { Text(blurb).foregroundStyle(Mocha.subtext0).fixedSize(horizontal: false, vertical: true) }
         }
     }
+}
+
+/// Pane padding: the window's transparent title bar already adds room at the top.
+extension View {
+    func panePadding() -> some View { padding(.horizontal, 28).padding(.top, 10).padding(.bottom, 22) }
 }
 
 // MARK: Home
@@ -267,59 +280,99 @@ private struct HomePane: View {
         query.isEmpty ? store.history : store.history.filter { $0.text.localizedCaseInsensitiveContains(query) || ($0.app ?? "").localizedCaseInsensitiveContains(query) }
     }
 
+    /// History split by day, newest first, so a long list stays scannable.
+    private var days: [(title: String, items: [Dictation])] {
+        let calendar = Calendar.current
+        let groups = Dictionary(grouping: filtered) { calendar.startOfDay(for: $0.date) }
+        return groups.keys.sorted(by: >).map { day in
+            let title = calendar.isDateInToday(day) ? "Today" : calendar.isDateInYesterday(day) ? "Yesterday"
+                : day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+            return (title, groups[day]!.sorted { $0.date > $1.date })
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 18) {
             PaneHeader(title: "Home")
-            HStack(spacing: 12) {
-                let words = store.history.reduce(0) { $0 + $1.words }
-                let seconds = store.history.reduce(0) { $0 + $1.seconds }
-                let weekAgo = Date().addingTimeInterval(-7 * 86_400)
-                Stat(label: "Dictations", value: "\(store.history.count)", color: Mocha.mauve)
-                Stat(label: "Words", value: "\(words)", color: Mocha.blue)
-                Stat(label: "Avg WPM", value: seconds > 0 ? "\(Int(Double(words) / seconds * 60))" : "-", color: Mocha.green)
-                Stat(label: "Words this week", value: "\(store.history.filter { $0.date > weekAgo }.reduce(0) { $0 + $1.words })", color: Mocha.peach)
-                Stat(label: "Meetings", value: "\(store.meetings.count)", color: Mocha.pink)
-            }
+            stats
             HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(Mocha.overlay0)
+                Image(systemName: "magnifyingglass").foregroundStyle(Mocha.overlay2)
                 TextField("", text: $query, prompt: placeholder("Search history")).textFieldStyle(.plain).focused($searchFocused)
                     .onExitCommand { query = ""; searchFocused = false }
                 KeyChip("/")
             }
-            .padding(10)
+            .padding(.horizontal, 10).padding(.vertical, 8)
             .background(Mocha.surface0, in: RoundedRectangle(cornerRadius: 8))
 
             if filtered.isEmpty {
-                Text(store.history.isEmpty ? "Hold Fn anywhere and start talking. Your dictations show up here." : "No matches.")
-                    .foregroundStyle(Mocha.overlay0)
+                Text(store.history.isEmpty ? "Hold Fn anywhere and start talking. Your dictations show up here." : "No dictations match \u{201C}\(query)\u{201D}.")
+                    .foregroundStyle(Mocha.subtext0)
                 Spacer()
             } else {
-                List(filtered, selection: $selection) { d in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(d.text).lineLimit(3).zfont(13) // List rows don't inherit the outer font
-                        HStack(spacing: 6) {
-                            Text(d.date, format: .relative(presentation: .named))
-                            if let app = d.app { Text("in \(app)") }
-                            Text("\(d.words) words")
-                        }
-                        .zfont(10).foregroundStyle(Mocha.overlay0)
-                    }
-                    .padding(.vertical, 4)
-                    .listRowBackground(selection == d.id ? Mocha.surface0 : Mocha.base)
-                    .contextMenu {
-                        Button("Copy") { copy(d) }
-                        Button("Delete", role: .destructive) { store.history.removeAll { $0.id == d.id } }
+                List(selection: $selection) {
+                    ForEach(days, id: \.title) { day in
+                        // A plain row rather than a Section header, which macOS paints with a gray bar.
+                        Text(day.title).zfont(11, .semibold).foregroundStyle(Mocha.subtext0)
+                            .padding(.top, 8)
+                            .listRowBackground(Mocha.base)
+                            .listRowSeparator(.hidden)
+                            .selectionDisabled()
+                        ForEach(day.items) { d in row(d).tag(d.id) }
                     }
                 }
                 .scrollContentBackground(.hidden)
                 .onKeyPress(.return) { selected.map(copy); return .handled }
                 .onDeleteCommand { if let id = selection { store.history.removeAll { $0.id == id } } }
                 .onCopyCommand { selected.map { [NSItemProvider(object: $0.text as NSString)] } ?? [] }
-                Text("Return copies the selected dictation, Delete removes it.").zfont(10).foregroundStyle(Mocha.overlay0)
+                HStack(spacing: 4) {
+                    KeyChip("↩"); Text("copies")
+                    KeyChip("⌫").padding(.leading, 8); Text("deletes the selected dictation")
+                }
+                .zfont(11).foregroundStyle(Mocha.overlay2)
             }
         }
-        .padding(28)
+        .panePadding()
         .onChange(of: searchRequest) { searchFocused = true }
+    }
+
+    /// One quiet line of numbers rather than a row of cards: the history is the content here.
+    private var stats: some View {
+        let words = store.history.reduce(0) { $0 + $1.words }
+        let seconds = store.history.reduce(0) { $0 + $1.seconds }
+        let weekAgo = Date().addingTimeInterval(-7 * 86_400)
+        let week = store.history.filter { $0.date > weekAgo }.reduce(0) { $0 + $1.words }
+        let items: [(String, String)] = [
+            ("\(store.history.count)", store.history.count == 1 ? "dictation" : "dictations"),
+            ("\(words)", "words"),
+            ("\(week)", "this week"),
+            (seconds > 0 ? "\(Int(Double(words) / seconds * 60))" : "-", "words per minute"),
+        ]
+        return HStack(spacing: 22) {
+            ForEach(items, id: \.1) { value, label in
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(value).zfont(17, .semibold).monospacedDigit()
+                    Text(label).foregroundStyle(Mocha.subtext0)
+                }
+            }
+        }
+    }
+
+    private func row(_ d: Dictation) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            AppIcon(name: d.app).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(d.text).lineLimit(3).zfont(13) // List rows don't inherit the outer font
+                Text([d.date.formatted(date: .omitted, time: .shortened), d.app, "\(d.words) word\(d.words == 1 ? "" : "s")"]
+                        .compactMap { $0 }.joined(separator: " \u{00B7} "))
+                    .zfont(11).foregroundStyle(Mocha.overlay2)
+            }
+        }
+        .padding(.vertical, 5)
+        .listRowBackground(selection == d.id ? Mocha.surface0 : Mocha.base)
+        .contextMenu {
+            Button("Copy") { copy(d) }
+            Button("Delete", role: .destructive) { store.history.removeAll { $0.id == d.id } }
+        }
     }
 
     private var selected: Dictation? { store.history.first { $0.id == selection } }
@@ -330,16 +383,33 @@ private struct HomePane: View {
     }
 }
 
-private struct Stat: View {
-    let label: String, value: String, color: Color
+/// The icon of the app a dictation went to, looked up by name once and cached.
+private struct AppIcon: View {
+    let name: String?
+    private static var cache: [String: NSImage] = [:]
+    @Environment(\.zoom) private var zoom
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(value).zfont(22, .bold).monospacedDigit().foregroundStyle(color)
-            Text(label).zfont(10).foregroundStyle(Mocha.subtext0).lineLimit(1).minimumScaleFactor(0.7)
+        Group {
+            if let image = name.flatMap(Self.icon) {
+                Image(nsImage: image).resizable()
+            } else {
+                Image(systemName: "text.cursor").foregroundStyle(Mocha.overlay2)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
+        .frame(width: 18 * zoom, height: 18 * zoom)
+    }
+
+    private static func icon(_ name: String) -> NSImage? {
+        if let hit = cache[name] { return hit }
+        let running = NSWorkspace.shared.runningApplications.first { $0.localizedName == name }?.bundleURL
+        let installed = ["/Applications", "/System/Applications", "/System/Applications/Utilities", NSHomeDirectory() + "/Applications"]
+            .map { URL(fileURLWithPath: "\($0)/\(name).app") }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+        guard let url = running ?? installed else { return nil }
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        cache[name] = image
+        return image
     }
 }
 
@@ -350,63 +420,113 @@ private struct MeetingsPane: View {
     let actions: DashboardActions
     @State private var selection: MeetingInfo.ID?
     @Environment(\.zoom) private var zoom
+    private static let colors = [Mocha.mauve, Mocha.peach, Mocha.teal, Mocha.pink, Mocha.blue, Mocha.yellow, Mocha.green, Mocha.lavender]
 
     private var selected: MeetingInfo? { store.meetings.first { $0.id == selection } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PaneHeader(title: "Meetings", blurb: "Recordings of your mic and call audio, transcribed by Scribe with speaker labels.")
-            HStack(spacing: 16) {
-                List(store.meetings, selection: $selection) { m in
-                    HStack {
-                        Text(m.title).zfont(13)
-                        Spacer()
-                        if m.transcript == nil { Image(systemName: "exclamationmark.circle").foregroundStyle(Mocha.yellow).help("No transcript yet") }
-                    }
-                    .listRowBackground(selection == m.id ? Mocha.surface0 : Mocha.base)
-                }
-                .scrollContentBackground(.hidden)
-                .frame(width: 240 * zoom)
-                .overlay {
-                    if store.meetings.isEmpty {
-                        Text("Press ⌃⌥⌘M to record your first meeting.").foregroundStyle(Mocha.overlay0).multilineTextAlignment(.center).padding()
-                    }
-                }
-
-                if let m = selected {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([m.dir]) }
-                            Button(m.transcript == nil ? "Transcribe" : "Re-transcribe") { actions.retranscribe(m) }
-                                .disabled(store.transcribingMeeting)
-                            Spacer()
-                            Button("Move to Trash", role: .destructive) {
-                                try? FileManager.default.trashItem(at: m.dir, resultingItemURL: nil)
-                                actions.meetingDeleted(m)
-                                selection = nil
-                                store.refreshMeetings()
+            PaneHeader(title: "Meetings", blurb: "Mic and call audio, transcribed by Scribe with speakers recognized by voice.")
+            if store.meetings.isEmpty {
+                empty
+            } else {
+                HStack(alignment: .top, spacing: 16) {
+                    List(store.meetings, selection: $selection) { m in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(m.date?.formatted(date: .abbreviated, time: .shortened) ?? m.title).zfont(13, .medium)
+                            Group {
+                                if m.transcript == nil {
+                                    Label("Not transcribed", systemImage: "exclamationmark.circle").foregroundStyle(Mocha.yellow)
+                                } else {
+                                    Text(m.speakers.isEmpty ? "Transcribed" : m.speakers.joined(separator: ", ")).foregroundStyle(Mocha.overlay2)
+                                }
                             }
+                            .zfont(11).lineLimit(1)
                         }
-                        ScrollView {
-                            Text(transcript(m)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                        }
-                        .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
+                        .padding(.vertical, 3)
+                        .listRowBackground(selection == m.id ? Mocha.surface0 : Mocha.base)
                     }
-                } else {
-                    Text("Select a meeting").foregroundStyle(Mocha.overlay0).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .scrollContentBackground(.hidden)
+                    .frame(width: 240 * zoom)
+
+                    if let m = selected { detail(m) } else {
+                        Text("Select a meeting").foregroundStyle(Mocha.subtext0).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
         }
-        .padding(28)
+        .panePadding()
         .onAppear { store.refreshMeetings(); selection = selection ?? store.meetings.first?.id }
     }
 
-    private func transcript(_ m: MeetingInfo) -> AttributedString {
-        guard let url = m.transcript, let md = try? String(contentsOf: url, encoding: .utf8) else {
-            return AttributedString(store.transcribingMeeting ? "Transcribing..." : "No transcript yet. The audio is saved, so you can transcribe it now.")
+    private var empty: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "waveform").zfont(28).foregroundStyle(Mocha.overlay2)
+            Text("No meetings yet").zfont(15, .semibold)
+            Text("Record a call or an in-person meeting. Your mic and the call audio are kept apart, and each voice is recognized across meetings.")
+                .foregroundStyle(Mocha.subtext0).multilineTextAlignment(.center).frame(maxWidth: 380)
+            Button(action: actions.toggleMeeting) { HStack { Text("Record meeting"); KeyChip("⌃⌥⌘M") } }
+                .padding(.top, 4)
         }
-        let body = md.split(separator: "\n", maxSplits: 1).dropFirst().joined() // the title is already in the list
-        return (try? AttributedString(markdown: body, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(body)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func detail(_ m: MeetingInfo) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(m.date?.formatted(date: .complete, time: .shortened) ?? m.title).zfont(15, .semibold)
+                Spacer()
+                Button(m.transcript == nil ? "Transcribe" : "Re-transcribe") { actions.retranscribe(m) }
+                    .disabled(store.transcribingMeeting)
+                Button { NSWorkspace.shared.activateFileViewerSelecting([m.dir]) } label: { Image(systemName: "folder") }
+                    .help("Reveal in Finder")
+                Button(role: .destructive) {
+                    try? FileManager.default.trashItem(at: m.dir, resultingItemURL: nil)
+                    actions.meetingDeleted(m)
+                    selection = nil
+                    store.refreshMeetings()
+                } label: { Image(systemName: "trash") }
+                    .help("Move to Trash")
+            }
+            ScrollView {
+                let segments = self.segments(m)
+                let speakers = segments.map(\.speaker).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+                if segments.isEmpty {
+                    Text(store.transcribingMeeting ? "Transcribing..." : "No transcript yet. The audio is saved, so you can transcribe it now.")
+                        .foregroundStyle(Mocha.subtext0).frame(maxWidth: .infinity, alignment: .leading).padding(18)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(segments.indices, id: \.self) { i in
+                            let s = segments[i]
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 8) {
+                                    Text(s.speaker).zfont(12, .semibold).foregroundStyle(Self.colors[(speakers.firstIndex(of: s.speaker) ?? 0) % Self.colors.count])
+                                    Text(clock(s.start)).zfont(11).monospacedDigit().foregroundStyle(Mocha.overlay2)
+                                }
+                                Text(TextRules.apply(s.text, replacements: store.replacements)).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .padding(18)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    /// The same labels the transcript file uses: recognized names first, then channel defaults.
+    private func segments(_ m: MeetingInfo) -> [Transcript.Segment] {
+        let mic = Meeting.loadWords(m.dir, "mic"), system = Meeting.loadWords(m.dir, "system")
+        let names = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: m.dir.appendingPathComponent("names.json"))))
+        return Transcript.merged(mic: mic, system: system, labels: names ?? Transcript.labels(mic: mic, system: system))
+    }
+
+    private func clock(_ seconds: Double) -> String {
+        let t = Int(seconds)
+        return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60) : String(format: "%02d:%02d", t / 60, t % 60)
     }
 }
 
@@ -424,7 +544,7 @@ private struct PeoplePane: View {
         VStack(alignment: .leading, spacing: 16) {
             PaneHeader(title: "People", blurb: "Recognized by voice across your meetings, entirely on this Mac. Name someone once and every transcript uses it.")
             if store.people.isEmpty {
-                Text("People show up here after your next transcribed meeting.").foregroundStyle(Mocha.overlay0)
+                Text("People show up here after your next transcribed meeting.").foregroundStyle(Mocha.subtext0)
                 Spacer()
             } else {
                 ScrollView {
@@ -437,7 +557,7 @@ private struct PeoplePane: View {
                 }
             }
         }
-        .padding(28)
+        .panePadding()
     }
 
     private func rename(_ id: UUID, to name: String) {
@@ -499,14 +619,14 @@ private struct PersonRow: View {
                     Text("·")
                     Text("last heard ") + Text(person.lastSeen, format: .relative(presentation: .named))
                 }
-                .zfont(10).foregroundStyle(Mocha.subtext0)
+                .zfont(11).foregroundStyle(Mocha.subtext0)
                 if !person.quote.isEmpty {
-                    Text("\u{201C}\(person.quote)\u{201D}").italic().zfont(10).foregroundStyle(Mocha.overlay0).lineLimit(2)
+                    Text("\u{201C}\(person.quote)\u{201D}").italic().zfont(11).foregroundStyle(Mocha.overlay2).lineLimit(2)
                 }
             }
             Spacer()
             if person.name.isEmpty && person.meetings.count >= 2 {
-                Text("Appears often").zfont(10, .semibold)
+                Text("Appears often").zfont(11, .semibold)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Mocha.yellow.opacity(0.2), in: Capsule())
                     .foregroundStyle(Mocha.yellow)
@@ -519,7 +639,7 @@ private struct PersonRow: View {
             .disabled(others.isEmpty)
             .help("Same person split in two? Merge them.")
             Button { delete() } label: { Image(systemName: "trash") }
-                .buttonStyle(.plain).foregroundStyle(Mocha.red).help("Forget this person")
+                .buttonStyle(.plain).foregroundStyle(Mocha.overlay1).help("Forget this person")
         }
         .padding(12)
         .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
@@ -537,41 +657,56 @@ private struct PairEditor<Item: Identifiable & Hashable>: View {
     let make: () -> Item
     let title: String, firstLabel: String, secondLabel: String, blurb: String
     @FocusState private var focused: Item.ID?
+    @State private var hovered: Item.ID?
     @Environment(\.zoom) private var zoom
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 PaneHeader(title: title, blurb: blurb)
-                Spacer()
-                Button { add() } label: { HStack { Text("Add"); KeyChip("⌘N") } }
+                Spacer(minLength: 24)
+                Button { add() } label: { HStack { Image(systemName: "plus"); Text("Add"); KeyChip("⌘N") } }
                     .keyboardShortcut("n", modifiers: .command)
             }
-            HStack {
-                Text(firstLabel).frame(width: 220 * zoom, alignment: .leading)
-                Text(secondLabel)
-            }
-            .zfont(10).foregroundStyle(Mocha.subtext0)
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach($items) { $item in
-                        HStack(alignment: .top) {
-                            TextField("", text: $item[dynamicMember: first], prompt: placeholder(firstLabel))
-                                .focused($focused, equals: item.id)
-                                .frame(width: 220 * zoom)
-                            TextField("", text: $item[dynamicMember: second], prompt: placeholder(secondLabel), axis: .vertical)
-                            Button { items.removeAll { $0.id == item.id } } label: { Image(systemName: "trash") }
-                                .buttonStyle(.plain).foregroundStyle(Mocha.red).help("Remove")
-                        }
-                        .textFieldStyle(.plain)
-                        .padding(10)
-                        .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 8))
+            if items.isEmpty {
+                Text("Nothing here yet. Press ⌘N to add one.").foregroundStyle(Mocha.subtext0)
+                Spacer()
+            } else {
+                // One table, rows split by hairlines, instead of a stack of cards.
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(firstLabel).frame(width: 220 * zoom, alignment: .leading)
+                        Text(secondLabel)
+                        Spacer()
                     }
-                    if items.isEmpty { Text("Nothing yet. Press ⌘N to add one.").foregroundStyle(Mocha.overlay0).frame(maxWidth: .infinity) }
+                    .zfont(11, .semibold).foregroundStyle(Mocha.subtext0)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach($items) { $item in
+                                Divider().overlay(Mocha.surface0)
+                                HStack(alignment: .top) {
+                                    TextField("", text: $item[dynamicMember: first], prompt: placeholder(firstLabel))
+                                        .focused($focused, equals: item.id)
+                                        .frame(width: 220 * zoom)
+                                    TextField("", text: $item[dynamicMember: second], prompt: placeholder(secondLabel), axis: .vertical)
+                                    Button { items.removeAll { $0.id == item.id } } label: { Image(systemName: "trash") }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(hovered == item.id ? Mocha.red : Mocha.overlay1)
+                                        .help("Remove")
+                                }
+                                .textFieldStyle(.plain)
+                                .padding(.horizontal, 14).padding(.vertical, 10)
+                                .background(hovered == item.id ? Mocha.surface0.opacity(0.5) : .clear)
+                                .onHover { hovered = $0 ? item.id : (hovered == item.id ? nil : hovered) }
+                            }
+                        }
+                    }
                 }
+                .background(Mocha.mantle, in: RoundedRectangle(cornerRadius: 10))
             }
         }
-        .padding(28)
+        .panePadding()
     }
 
     private func add() {
@@ -608,7 +743,7 @@ private struct SettingsPane: View {
                             .onSubmit(saveKey)
                         Button("Save", action: saveKey).disabled(key.isEmpty)
                     }
-                    Text("\(keyStatus). Stored in ~/.config/screamr/api_key, readable only by you.").zfont(10).foregroundStyle(Mocha.subtext0)
+                    Text("\(keyStatus). Stored in ~/.config/screamr/api_key, readable only by you.").zfont(11).foregroundStyle(Mocha.subtext0)
                 }
                 group("Permissions") {
                     let _ = refresh
@@ -634,7 +769,7 @@ private struct SettingsPane: View {
                         Button("Sync now", action: actions.syncNow).disabled(Store.syncConfig() == nil)
                     }
                     Text(syncError ?? (store.syncStatus.isEmpty ? "Meetings sync with the iPhone app through your sync server." : store.syncStatus))
-                        .zfont(10).foregroundStyle(syncError == nil ? Mocha.subtext0 : Mocha.red)
+                        .zfont(11).foregroundStyle(syncError == nil ? Mocha.subtext0 : Mocha.red)
                 }
                 group("Microphone") {
                     let _ = refresh
@@ -647,7 +782,7 @@ private struct SettingsPane: View {
                         }
                     }
                     .frame(maxWidth: 420)
-                    Text("Used for dictation and meetings, from the next recording on.").zfont(10).foregroundStyle(Mocha.subtext0)
+                    Text("Used for dictation and meetings, from the next recording on.").zfont(11).foregroundStyle(Mocha.subtext0)
                 }
                 group("General") {
                     Toggle("Launch screamr at login", isOn: $launchAtLogin)
@@ -657,14 +792,14 @@ private struct SettingsPane: View {
                             do { try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister(); loginError = nil }
                             catch { loginError = error.localizedDescription; launchAtLogin = !on }
                         }
-                    if let loginError { Text(loginError).zfont(10).foregroundStyle(Mocha.red) }
+                    if let loginError { Text(loginError).zfont(11).foregroundStyle(Mocha.red) }
                     Toggle("Learn words I correct after dictating", isOn: $learnCorrections)
                     Text("For 30 seconds after a paste, screamr reads the text field you dictated into. If you retype a misheard name or term, it's added to the Dictionary. The text stays on this Mac.")
-                        .zfont(10).foregroundStyle(Mocha.subtext0).fixedSize(horizontal: false, vertical: true)
+                        .zfont(11).foregroundStyle(Mocha.subtext0).fixedSize(horizontal: false, vertical: true)
                 }
                 group("Keyboard shortcuts") { ShortcutTable() }
             }
-            .padding(28)
+            .panePadding()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh += 1 }
     }
@@ -683,10 +818,10 @@ private struct SettingsPane: View {
     private func permission(_ name: String, detail: String, granted: Bool?, pane: String, request: (() -> Void)? = nil) -> some View {
         HStack {
             Image(systemName: granted == true ? "checkmark.circle.fill" : granted == false ? "xmark.circle.fill" : "questionmark.circle")
-                .foregroundStyle(granted == true ? Mocha.green : granted == false ? Mocha.red : Mocha.overlay0)
+                .foregroundStyle(granted == true ? Mocha.green : granted == false ? Mocha.red : Mocha.subtext0)
             VStack(alignment: .leading) {
                 Text(name)
-                Text(detail).zfont(10).foregroundStyle(Mocha.subtext0)
+                Text(detail).zfont(11).foregroundStyle(Mocha.subtext0)
             }
             Spacer()
             if let request, granted != true {
@@ -831,7 +966,10 @@ final class DashboardWindow: NSObject, NSWindowDelegate {
             w.appearance = NSAppearance(named: .darkAqua)
             w.backgroundColor = NSColor(Mocha.base)
             w.minSize = NSSize(width: 820, height: 520)
-            w.contentView = NSHostingView(rootView: Dashboard(store: store, actions: actions))
+            let host = NSHostingView(rootView: Dashboard(store: store, actions: actions))
+            // The window keeps the size the user gives it; long transcripts scroll instead of growing it.
+            host.sizingOptions = []
+            w.contentView = host
             w.isReleasedWhenClosed = false
             w.delegate = self
             w.center()

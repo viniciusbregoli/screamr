@@ -14,6 +14,8 @@ enum Mocha {
     static let lavender = Color(hex: 0xb4befe)
     static let text = Color(hex: 0xcdd6f4)
     static let subtext0 = Color(hex: 0xa6adc8)
+    static let overlay2 = Color(hex: 0x9399b2)
+    static let overlay1 = Color(hex: 0x7f849c)
     static let overlay0 = Color(hex: 0x6c7086)
     static let surface1 = Color(hex: 0x45475a)
     static let surface0 = Color(hex: 0x313244)

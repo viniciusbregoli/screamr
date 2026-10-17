@@ -30,6 +30,23 @@ struct MeetingInfo: Identifiable, Hashable {
         let url = dir.appendingPathComponent("transcript.md")
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
+
+    /// From the folder name: "yyyy-MM-dd HH.mm.ss", or without seconds for older meetings.
+    var date: Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        for format in ["yyyy-MM-dd HH.mm.ss", "yyyy-MM-dd HH.mm"] {
+            f.dateFormat = format
+            if let d = f.date(from: dir.lastPathComponent) { return d }
+        }
+        return nil
+    }
+
+    /// Speaker labels as rendered, or empty before the first transcription.
+    var speakers: [String] {
+        let names = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: dir.appendingPathComponent("names.json")))) ?? [:]
+        return Array(Set(names.values)).sorted()
+    }
 }
 
 /// Everything the dashboard manages, persisted as JSON under Application Support/Screamr.
@@ -80,7 +97,7 @@ final class Store: ObservableObject {
     }
 
     func refreshMeetings() {
-        let dirs = (try? FileManager.default.contentsOfDirectory(at: Meeting.root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        let dirs = (try? FileManager.default.contentsOfDirectory(at: dir.appendingPathComponent("Meetings"), includingPropertiesForKeys: [.isDirectoryKey])) ?? []
         meetings = dirs.filter { $0.hasDirectoryPath }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
             .map { MeetingInfo(dir: $0, title: "Meeting \($0.lastPathComponent)") }
