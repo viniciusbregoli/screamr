@@ -501,7 +501,8 @@ private struct MeetingsPane: View {
                 Text(m.date?.formatted(date: .complete, time: .shortened) ?? m.title).zfont(15, .semibold)
                 Spacer()
                 Button(m.transcript == nil ? "Transcribe" : "Re-transcribe") { actions.retranscribe(m) }
-                    .disabled(store.transcribingMeeting)
+                    // Audio is retired 90 days after the meeting; the transcript stays.
+                    .disabled(store.transcribingMeeting || !FileManager.default.fileExists(atPath: m.dir.appendingPathComponent("mic.m4a").path))
                 Button { NSWorkspace.shared.activateFileViewerSelecting([m.dir]) } label: { Image(systemName: "folder") }
                     .help("Reveal in Finder")
                 Button(role: .destructive) {
