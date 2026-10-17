@@ -76,6 +76,9 @@ enum Corrections {
 /// Watches the text field a dictation was pasted into for the fix the user makes next. Reads the
 /// field through Accessibility only while watching; the text itself is never stored.
 final class CorrectionWatcher {
+    /// Settings toggle; learning is on unless turned off.
+    static let enabledKey = "learnCorrections"
+
     private var timer: Timer?
 
     func watch(dictated: String, onLearn: @escaping (_ wrong: String, _ right: String) -> Void) {

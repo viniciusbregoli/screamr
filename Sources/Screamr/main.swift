@@ -6,6 +6,7 @@ final class App: NSObject, NSApplicationDelegate {
     private let fn = FnKey()
     private let recorder = Recorder()
     private let flowBar = FlowBar()
+    private let corrections = CorrectionWatcher()
     private let store = Store.shared
     private let dashboard = DashboardWindow()
     private var ptt = PushToTalk()
@@ -100,6 +101,7 @@ final class App: NSObject, NSApplicationDelegate {
 
     private func begin() {
         guard !recording else { return }
+        corrections.stop()
         do {
             try recorder.start()
             recording = true
@@ -131,12 +133,22 @@ final class App: NSObject, NSApplicationDelegate {
                 if !text.isEmpty {
                     Paster.insert(text.hasSuffix("\n") ? text : text + " ")
                     store.history.insert(Dictation(date: Date(), text: text, app: app, seconds: take.seconds), at: 0)
+                    if UserDefaults.standard.object(forKey: CorrectionWatcher.enabledKey) as? Bool ?? true {
+                        corrections.watch(dictated: text) { wrong, right in self.learn(wrong, right) }
+                    }
                 }
                 idle()
             } catch {
                 fail(error.localizedDescription)
             }
         }
+    }
+
+    /// A word fixed by hand right after dictating becomes a dictionary entry, so Scribe gets it next time.
+    private func learn(_ wrong: String, _ right: String) {
+        guard !store.dictionary.contains(where: { $0.phrase.lowercased() == wrong.lowercased() }) else { return }
+        store.dictionary.append(DictionaryEntry(phrase: wrong, replacement: right))
+        flowBar.flash("Added to dictionary", "\(wrong) \u{2192} \(right)")
     }
 
     @objc private func toggleMeeting() {
