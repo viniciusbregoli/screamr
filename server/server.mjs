@@ -7,10 +7,12 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { computeMetrics, METRICS_VERSION } from './metrics.mjs'
+import { classify, summarize, turnsToClassify } from './jev.mjs'
 
 const defaultLexicon = () => JSON.parse(readFileSync(new URL('./lexicon/v1.json', import.meta.url)))
+const defaultRubric = () => JSON.parse(readFileSync(new URL('./rubric/v1.json', import.meta.url)))
 
-export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = defaultLexicon() }) {
+export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = defaultLexicon(), rubric = defaultRubric(), jevKey = process.env.TYPESAFE_API_KEY, jevFetch = fetch }) {
   if (!token) throw new Error('SCREAMR_SYNC_TOKEN missing')
   const blobs = join(dataDir, 'blobs')
   const tmp = join(dataDir, 'tmp')
@@ -25,7 +27,14 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
       updated REAL NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL,
       PRIMARY KEY (kind, id));
     CREATE INDEX IF NOT EXISTS records_seq ON records (seq);
-    CREATE TABLE IF NOT EXISTS metrics (meeting TEXT PRIMARY KEY, version TEXT NOT NULL, body TEXT NOT NULL);`)
+    CREATE TABLE IF NOT EXISTS metrics (meeting TEXT PRIMARY KEY, version TEXT NOT NULL, body TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS jev (
+      meeting TEXT NOT NULL, turn INTEGER NOT NULL, rubric_version TEXT NOT NULL, model_id TEXT NOT NULL,
+      start REAL, end REAL, words INTEGER, answers TEXT NOT NULL, input_tokens INTEGER, classified_at TEXT,
+      PRIMARY KEY (meeting, turn, rubric_version));
+    CREATE TABLE IF NOT EXISTS jev_meetings (
+      meeting TEXT NOT NULL, rubric_version TEXT NOT NULL, words_hash TEXT NOT NULL, done_at TEXT, error TEXT,
+      PRIMARY KEY (meeting, rubric_version));`)
   const changes = db.prepare('SELECT kind, id, body, updated, deleted, seq FROM records WHERE seq > ? ORDER BY seq')
   // A write only lands if it is newer than what the server has; every landed write gets the next seq.
   const upsert = db.prepare(`
@@ -42,6 +51,50 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
   const saveMetrics = db.prepare('INSERT INTO metrics (meeting, version, body) VALUES (?, ?, ?) ON CONFLICT (meeting) DO UPDATE SET version = excluded.version, body = excluded.body')
   const dropMetrics = db.prepare('DELETE FROM metrics WHERE meeting = ?')
   const allMetrics = db.prepare('SELECT meeting, body FROM metrics ORDER BY meeting')
+
+  // Jev classification of the user's turns, in the background so sync never waits on it. A meeting is
+  // re-classified only when its mic words change (not on a rename) or the rubric version does.
+  const jevState = db.prepare('SELECT words_hash, done_at FROM jev_meetings WHERE meeting = ? AND rubric_version = ?')
+  const markJev = db.prepare('INSERT INTO jev_meetings (meeting, rubric_version, words_hash, done_at, error) VALUES (?, ?, ?, ?, ?) ON CONFLICT (meeting, rubric_version) DO UPDATE SET words_hash = excluded.words_hash, done_at = excluded.done_at, error = excluded.error')
+  const saveJev = db.prepare('INSERT INTO jev (meeting, turn, rubric_version, model_id, start, end, words, answers, input_tokens, classified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (meeting, turn, rubric_version) DO UPDATE SET model_id = excluded.model_id, start = excluded.start, end = excluded.end, words = excluded.words, answers = excluded.answers, input_tokens = excluded.input_tokens, classified_at = excluded.classified_at')
+  const clearJev = db.prepare('DELETE FROM jev WHERE meeting = ? AND rubric_version = ?')
+  const dropJev = db.prepare('DELETE FROM jev WHERE meeting = ?')
+  const dropJevMeeting = db.prepare('DELETE FROM jev_meetings WHERE meeting = ?')
+  const jevRows = db.prepare('SELECT meeting, turn, model_id, start, end, words, answers FROM jev WHERE rubric_version = ? ORDER BY meeting, turn')
+  const jevQueue = new Map()
+  let jevDrain = Promise.resolve()
+  const queueJev = (id, wordsHash, mic, language) => {
+    if (!jevKey) return
+    const state = jevState.get(id, rubric.version)
+    if (state?.words_hash === wordsHash && state.done_at) return
+    const idle = jevQueue.size === 0
+    jevQueue.set(id, { wordsHash, mic, language })
+    if (idle) jevDrain = drainJev()
+  }
+  const drainJev = async () => {
+    while (jevQueue.size) {
+      const [id, job] = jevQueue.entries().next().value
+      jevQueue.delete(id)
+      try {
+        const turns = turnsToClassify(job.mic)
+        const results = []
+        // A few turns at a time: fast for a long meeting without tripping the rate limit.
+        for (let i = 0; i < turns.length; i += 4) {
+          results.push(...await Promise.all(turns.slice(i, i + 4).map(async (t) => ({ t, r: await classify(t, { rubric, language: job.language, apiKey: jevKey, fetchImpl: jevFetch }) }))))
+        }
+        const now = new Date().toISOString()
+        db.exec('BEGIN')
+        clearJev.run(id, rubric.version)
+        for (const { t, r } of results) saveJev.run(id, t.index, rubric.version, r.model_id, t.start, t.end, t.words, JSON.stringify(r.answers), r.input_tokens, now)
+        markJev.run(id, rubric.version, job.wordsHash, now, null)
+        db.exec('COMMIT')
+      } catch (e) {
+        if (db.isTransaction) db.exec('ROLLBACK')
+        markJev.run(id, rubric.version, job.wordsHash, null, e.message)
+        console.error(`jev for ${id} failed: ${e.message}`)
+      }
+    }
+  }
   const readBlob = (manifest, name) => {
     const hash = manifest[name]
     if (!hash || !existsSync(blobPath(hash))) return undefined
@@ -52,9 +105,16 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
       const record = meetingRecord.get(id)
       const manifest = record && !record.deleted ? JSON.parse(record.body) : {}
       const mic = readBlob(manifest, 'mic.words.json')
-      if (!mic) return dropMetrics.run(id)
-      const metrics = computeMetrics({ mic, system: readBlob(manifest, 'system.words.json') ?? [], meta: readBlob(manifest, 'meta.json') ?? null, lexicon })
+      if (!mic) {
+        dropMetrics.run(id)
+        dropJev.run(id)
+        dropJevMeeting.run(id)
+        return
+      }
+      const meta = readBlob(manifest, 'meta.json') ?? null
+      const metrics = computeMetrics({ mic, system: readBlob(manifest, 'system.words.json') ?? [], meta, lexicon })
       saveMetrics.run(id, metricsVersion, JSON.stringify({ ...metrics, computed_at: new Date().toISOString() }))
+      if (metrics.eligible) queueJev(id, manifest['mic.words.json'], mic, metrics.language)
     } catch (e) {
       // Metrics are derived data: a bad file must never break sync.
       console.error(`metrics for ${id} failed: ${e.message}`)
@@ -94,6 +154,15 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
   // Catch up on meetings synced before this metric or word-list version.
   const stale = db.prepare("SELECT r.id FROM records r LEFT JOIN metrics m ON m.meeting = r.id WHERE r.kind = 'meeting' AND r.deleted = 0 AND (m.version IS NULL OR m.version != ?)")
   for (const { id } of stale.all(metricsVersion)) updateMetrics(id)
+  // And on baseline meetings not yet classified under this rubric (new rubric version, earlier failures).
+  for (const { meeting, body } of allMetrics.all()) {
+    const metrics = JSON.parse(body)
+    if (!metrics.eligible) continue
+    const record = meetingRecord.get(meeting)
+    const manifest = record && !record.deleted ? JSON.parse(record.body) : {}
+    const mic = readBlob(manifest, 'mic.words.json')
+    if (mic) queueJev(meeting, manifest['mic.words.json'], mic, metrics.language)
+  }
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x')
@@ -105,6 +174,17 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
         const since = Number(url.searchParams.get('since') ?? 0)
         const records = changes.all(since).map((r) => ({ ...r, deleted: r.deleted === 1 }))
         return send(res, 200, { records, cursor: Number(maxSeq.get().seq) })
+      }
+
+      if (req.method === 'GET' && url.pathname === '/jev') {
+        // Answers and timings only: the turn text stays in the meeting's files.
+        const byMeeting = new Map()
+        for (const row of jevRows.all(rubric.version)) {
+          const turn = { turn: row.turn, start: row.start, end: row.end, words: row.words, model_id: row.model_id, answers: JSON.parse(row.answers) }
+          byMeeting.set(row.meeting, [...(byMeeting.get(row.meeting) ?? []), turn])
+        }
+        const meetings = [...byMeeting].map(([meeting, turns]) => ({ meeting, summary: summarize(turns), turns }))
+        return send(res, 200, { rubric_version: rubric.version, provisional: rubric.provisional ?? false, model: rubric.model, meetings })
       }
 
       if (req.method === 'GET' && url.pathname === '/metrics') {
@@ -179,7 +259,9 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
   return new Promise((resolve) => {
     server.listen(port, host, () => resolve({
       port: server.address().port,
-      close: () => new Promise((done) => { clearInterval(timer); server.close(() => { db.close(); done() }) }),
+      /** Resolves once queued Jev classifications finish (tests and graceful shutdown). */
+      jevIdle: () => jevDrain,
+      close: () => new Promise((done) => { clearInterval(timer); server.close(() => jevDrain.finally(() => { db.close(); done() })) }),
     }))
   })
 }
