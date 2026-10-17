@@ -16,8 +16,12 @@ actor SyncEngine {
         var errorDescription: String? { message }
     }
 
-    /// File name to SHA-256.
+    /// File name to SHA-256, or `retired` once the server's retention period removed the file.
     typealias Manifest = [String: String]
+
+    /// Written by the sync server in place of a hash when a file (meeting audio, after 90 days) is retired.
+    /// Final: it wins over a local copy, which gets deleted, and is never uploaded or downloaded again.
+    static let retired = "retired"
 
     struct State: Codable {
         var cursor = 0
@@ -100,7 +104,8 @@ actor SyncEngine {
             let base = state.base[id] ?? [:]
             let theirs = remote[id] ?? base
             let mine = try manifest(dir)
-            let (merged, download) = Self.merge(base: base, local: mine, remote: theirs, wants: wants)
+            let (merged, download, delete) = Self.merge(base: base, local: mine, remote: theirs, wants: wants)
+            for name in delete { try? FileManager.default.removeItem(at: dir.appendingPathComponent(name)) }
             if !download.isEmpty {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 for name in download { try await fetch(config, hash: theirs[name]!, to: dir.appendingPathComponent(name)) }
@@ -134,19 +139,24 @@ actor SyncEngine {
         return try JSONDecoder().decode(Changes.self, from: try await send(config, request(config, "GET", components.url!)))
     }
 
-    /// Three-way merge of one meeting's files. A file changed or added here wins and gets pushed;
-    /// otherwise a file that differs on the server (or is missing here) is downloaded, if wanted.
-    static func merge(base: Manifest, local: Manifest, remote: Manifest, wants: (String) -> Bool) -> (merged: Manifest, download: [String]) {
+    /// Three-way merge of one meeting's files. A retired file stays retired and its local copy is deleted.
+    /// Otherwise a file changed or added here wins and gets pushed, and a file that differs on the server
+    /// (or is missing here) is downloaded, if wanted.
+    static func merge(base: Manifest, local: Manifest, remote: Manifest, wants: (String) -> Bool) -> (merged: Manifest, download: [String], delete: [String]) {
         var merged = remote
         var download: [String] = []
+        var delete: [String] = []
         for name in Set(base.keys).union(local.keys).union(remote.keys).sorted() {
-            if let mine = local[name], mine != base[name] {
+            if remote[name] == retired || base[name] == retired {
+                merged[name] = retired
+                if local[name] != nil { delete.append(name) }
+            } else if let mine = local[name], mine != base[name] {
                 merged[name] = mine
             } else if let theirs = remote[name], theirs != local[name], wants(name) {
                 download.append(name)
             }
         }
-        return (merged, download)
+        return (merged, download, delete)
     }
 
     static func sha256(_ url: URL) throws -> String {
