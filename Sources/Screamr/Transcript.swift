@@ -24,7 +24,7 @@ enum Transcript {
     /// `name` maps (Scribe speaker id, its index within the channel, distinct speakers in the channel) to a label.
     static func segments(_ words: [Word], name: (String, Int, Int) -> String) -> [Segment] {
         let spoken = words.filter { $0.type == "word" }
-        let ids = spoken.compactMap(\.speaker_id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let ids = speakerIDs(words)
         var out: [Segment] = []
         for w in spoken {
             let start = w.start ?? out.last?.end ?? 0
@@ -44,11 +44,34 @@ enum Transcript {
     static func micName(_ id: String, _ i: Int, _ count: Int) -> String { count == 1 ? "You" : "Room \(i + 1)" }
     static func systemName(_ id: String, _ i: Int, _ count: Int) -> String { "Speaker \(i + 1)" }
 
+    static func speakerIDs(_ words: [Word]) -> [String] {
+        words.filter { $0.type == "word" }.compactMap(\.speaker_id).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+
+    /// Every speaker's label, keyed "mic:speaker_0" / "system:speaker_1": `names` (recognized people) first,
+    /// then the channel defaults. Saved as names.json so other devices show the same labels.
+    static func labels(mic: [Word], system: [Word], names: [String: String] = [:],
+                       micName: (String, Int, Int) -> String = micName) -> [String: String] {
+        var out: [String: String] = [:]
+        func add(_ channel: String, _ words: [Word], _ fallback: (String, Int, Int) -> String) {
+            let ids = speakerIDs(words)
+            for (i, id) in ids.enumerated() { out["\(channel):\(id)"] = names["\(channel):\(id)"] ?? fallback(id, i, ids.count) }
+        }
+        add("mic", mic, micName)
+        add("system", system, systemName)
+        return out
+    }
+
+    /// Both channels as one conversation, in time order.
+    static func merged(mic: [Word], system: [Word], labels: [String: String]) -> [Segment] {
+        let micSegments = segments(mic) { id, i, n in labels["mic:\(id)"] ?? micName(id, i, n) }
+        let systemSegments = segments(system) { id, i, n in labels["system:\(id)"] ?? systemName(id, i, n) }
+        return (micSegments + systemSegments).sorted { $0.start < $1.start }
+    }
+
     /// `names` overrides labels for recognized people, keyed "mic:speaker_0" / "system:speaker_1".
     static func markdown(title: String, mic: [Word], system: [Word], names: [String: String] = [:], fix: (String) -> String = { $0 }) -> String {
-        let micSegments = segments(mic) { id, i, n in names["mic:\(id)"] ?? micName(id, i, n) }
-        let systemSegments = segments(system) { id, i, n in names["system:\(id)"] ?? systemName(id, i, n) }
-        let all = (micSegments + systemSegments).sorted { $0.start < $1.start }
+        let all = merged(mic: mic, system: system, labels: labels(mic: mic, system: system, names: names))
         var md = "# \(title)\n\n"
         if all.isEmpty { md += "_No speech detected._\n" }
         for s in all {

@@ -90,7 +90,11 @@ final class Meeting {
         let assigned = (try? JSONDecoder().decode([String: UUID].self, from: Data(contentsOf: dir.appendingPathComponent("speakers.json")))) ?? [:]
         let names = assigned.compactMapValues { store.person($0)?.displayName }
         let rules = store.replacements
-        let md = Transcript.markdown(title: title, mic: loadWords(dir, "mic"), system: loadWords(dir, "system"), names: names) {
+        let mic = loadWords(dir, "mic"), system = loadWords(dir, "system")
+        // Other devices have no people database, so they read the final labels from here.
+        let labels = Transcript.labels(mic: mic, system: system, names: names)
+        try JSONEncoder().encode(labels).write(to: dir.appendingPathComponent("names.json"), options: .atomic)
+        let md = Transcript.markdown(title: title, mic: mic, system: system, names: names) {
             TextRules.apply($0, replacements: rules)
         }
         let out = dir.appendingPathComponent("transcript.md")

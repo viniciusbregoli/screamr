@@ -47,6 +47,7 @@ final class Store: ObservableObject {
     @Published var meetings: [MeetingInfo] = []
     @Published var meetingActive = false
     @Published var transcribingMeeting = false
+    @Published var syncStatus = ""
 
     private let dir: URL
 
@@ -83,6 +84,20 @@ final class Store: ObservableObject {
         meetings = dirs.filter { $0.hasDirectoryPath }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
             .map { MeetingInfo(dir: $0, title: "Meeting \($0.lastPathComponent)") }
+    }
+
+    static let syncFile = keyFile.deletingLastPathComponent().appendingPathComponent("sync.json")
+
+    /// Sync server URL and token, kept next to the API key and readable only by the user.
+    static func syncConfig() -> SyncEngine.Config? {
+        try? JSONDecoder().decode(SyncEngine.Config.self, from: Data(contentsOf: syncFile))
+    }
+
+    static func saveSyncConfig(_ config: SyncEngine.Config) throws {
+        try FileManager.default.createDirectory(at: syncFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard FileManager.default.createFile(atPath: syncFile.path, contents: try JSONEncoder().encode(config), attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: syncFile.path])
+        }
     }
 
     static func apiKey() -> String? {

@@ -10,19 +10,33 @@ struct MeetingFolder: Identifiable, Hashable {
         return f
     }()
 
+    /// Older Mac meetings have no seconds in their folder name.
+    static let minuteStamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH.mm"
+        return f
+    }()
+
     let dir: URL
     var id: URL { dir }
-    var date: Date { Self.stamp.date(from: dir.lastPathComponent) ?? .distantPast }
+    var date: Date { Self.stamp.date(from: dir.lastPathComponent) ?? Self.minuteStamp.date(from: dir.lastPathComponent) ?? .distantPast }
     var title: String { date.formatted(date: .abbreviated, time: .shortened) }
     var audio: URL { dir.appendingPathComponent("mic.m4a") }
     var wordsFile: URL { dir.appendingPathComponent("mic.words.json") }
     var transcript: URL { dir.appendingPathComponent("transcript.md") }
     var isTranscribed: Bool { FileManager.default.fileExists(atPath: wordsFile.path) }
+    /// Meetings synced from the Mac arrive without audio.
+    var hasAudio: Bool { FileManager.default.fileExists(atPath: audio.path) }
 
-    /// In-person meetings have no "You" channel, so every voice is a numbered speaker.
+    /// Labels come from names.json once the Mac has recognized the speakers. Before that, in-person
+    /// meetings have no "You" channel, so every voice is a numbered speaker.
     var segments: [Transcript.Segment] {
-        let words = (try? JSONDecoder().decode([Transcript.Word].self, from: Data(contentsOf: wordsFile))) ?? []
-        return Transcript.segments(words, name: Transcript.systemName)
+        func words(_ channel: String) -> [Transcript.Word] {
+            (try? JSONDecoder().decode([Transcript.Word].self, from: Data(contentsOf: dir.appendingPathComponent("\(channel).words.json")))) ?? []
+        }
+        let mic = words("mic"), system = words("system")
+        let names = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: dir.appendingPathComponent("names.json"))))
+        return Transcript.merged(mic: mic, system: system, labels: names ?? Transcript.labels(mic: mic, system: system, micName: Transcript.systemName))
     }
 }
 
@@ -34,6 +48,16 @@ struct MeetingFolder: Identifiable, Hashable {
     private(set) var meetings: [MeetingFolder] = []
     private(set) var transcribing: Set<URL> = []
     var errors: [URL: String] = [:]
+    private(set) var syncing = false
+    private(set) var syncStatus = ""
+    // Audio stays on the device that recorded it; the iPhone only needs transcripts and labels.
+    private let sync = SyncEngine(root: root, stateFile: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("sync-state.json"), wants: { !$0.hasSuffix(".m4a") })
+
+    static var syncConfig: SyncEngine.Config? {
+        guard let raw = UserDefaults.standard.string(forKey: "syncURL"), let url = URL(string: raw), let token = Keychain.syncToken else { return nil }
+        return SyncEngine.Config(url: url, token: token)
+    }
 
     init() { refresh() }
 
@@ -52,6 +76,25 @@ struct MeetingFolder: Identifiable, Hashable {
 
     func delete(_ meeting: MeetingFolder) {
         try? FileManager.default.removeItem(at: meeting.dir)
+        refresh()
+        Task {
+            await sync.markDeleted(meeting.dir.lastPathComponent)
+            await syncNow()
+        }
+    }
+
+    /// Skips meetings still recording or transcribing. Without a configured server this does nothing.
+    @MainActor
+    func syncNow(skip: Set<String> = []) async {
+        guard !syncing, let config = Self.syncConfig else { return }
+        syncing = true
+        defer { syncing = false }
+        do {
+            _ = try await sync.run(config, skip: skip.union(transcribing.map(\.lastPathComponent)))
+            syncStatus = "Synced at \(Date().formatted(date: .omitted, time: .shortened))"
+        } catch {
+            syncStatus = "Sync failed: \(error.localizedDescription)"
+        }
         refresh()
     }
 
@@ -79,7 +122,10 @@ struct MeetingFolder: Identifiable, Hashable {
             try md.write(to: meeting.transcript, atomically: true, encoding: .utf8)
         } catch {
             errors[meeting.dir] = error.localizedDescription
+            return
         }
+        transcribing.remove(meeting.dir)
+        await syncNow()
     }
 }
 
@@ -132,28 +178,36 @@ struct MeetingFolder: Identifiable, Hashable {
     }
 }
 
-/// The ElevenLabs key, readable after first unlock so a locked phone can still transcribe.
+/// Secrets, readable after first unlock so a locked phone can still transcribe and sync.
 enum Keychain {
-    private static let item: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "dev.screamr.elevenlabs",
-    ]
-
     static var apiKey: String? {
-        get {
-            var query = item
-            query[kSecReturnData as String] = true
-            var out: AnyObject?
-            guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
-            return String(decoding: data, as: UTF8.self)
-        }
-        set {
-            SecItemDelete(item as CFDictionary)
-            guard let newValue, !newValue.isEmpty else { return }
-            var query = item
-            query[kSecValueData as String] = Data(newValue.utf8)
-            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            SecItemAdd(query as CFDictionary, nil)
-        }
+        get { read("dev.screamr.elevenlabs") }
+        set { write("dev.screamr.elevenlabs", newValue) }
+    }
+
+    static var syncToken: String? {
+        get { read("dev.screamr.sync") }
+        set { write("dev.screamr.sync", newValue) }
+    }
+
+    private static func item(_ service: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
+    }
+
+    private static func read(_ service: String) -> String? {
+        var query = item(service)
+        query[kSecReturnData as String] = true
+        var out: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func write(_ service: String, _ value: String?) {
+        SecItemDelete(item(service) as CFDictionary)
+        guard let value, !value.isEmpty else { return }
+        var query = item(service)
+        query[kSecValueData as String] = Data(value.utf8)
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(query as CFDictionary, nil)
     }
 }
