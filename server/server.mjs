@@ -8,6 +8,7 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync
 import { join } from 'node:path'
 import { computeMetrics, METRICS_VERSION } from './metrics.mjs'
 import { classify, summarize, turnsToClassify } from './jev.mjs'
+import { loadRubric } from './rubric.mjs'
 
 export const RETIRED = 'retired'
 const AUDIO = ['mic.m4a', 'system.m4a']
@@ -19,9 +20,8 @@ export function meetingDate(id) {
 }
 
 const defaultLexicon = () => JSON.parse(readFileSync(new URL('./lexicon/v1.json', import.meta.url)))
-const defaultRubric = () => JSON.parse(readFileSync(new URL('./rubric/v1.json', import.meta.url)))
 
-export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = defaultLexicon(), rubric = defaultRubric(), jevKey = process.env.TYPESAFE_API_KEY, jevFetch = fetch, retentionDays = 90, now = Date.now }) {
+export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = defaultLexicon(), rubric = loadRubric(), jevKey = process.env.TYPESAFE_API_KEY, jevFetch = fetch, retentionDays = 90, now = Date.now }) {
   if (!token) throw new Error('SCREAMR_SYNC_TOKEN missing')
   const blobs = join(dataDir, 'blobs')
   const tmp = join(dataDir, 'tmp')
