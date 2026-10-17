@@ -4,7 +4,7 @@
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash, timingSafeEqual } from 'node:crypto'
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { computeMetrics, METRICS_VERSION } from './metrics.mjs'
 import { classify, summarize, turnsToClassify } from './jev.mjs'
@@ -12,6 +12,13 @@ import { loadRubric } from './rubric.mjs'
 
 export const RETIRED = 'retired'
 const AUDIO = ['mic.m4a', 'system.m4a']
+export const TITLE = 'title.txt'
+
+/** A meeting title as the apps store it: one line, trimmed, at most 120 characters. Null when too long. */
+export function cleanTitle(raw) {
+  const title = raw.split(/[\r\n]+/).join(' ').trim()
+  return [...title].length > 120 ? null : title
+}
 
 /** A meeting's files, `{ name: sha256 | "retired" }`, or null when the body isn't one. */
 export function parseManifest(body) {
@@ -66,7 +73,7 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
 
   // Speech metrics per meeting, recomputed when its files change or the metric or word-list version does.
   const metricsVersion = `${METRICS_VERSION}+${lexicon.version}`
-  const meetingRecord = db.prepare("SELECT body, deleted FROM records WHERE kind = 'meeting' AND id = ?")
+  const meetingRecord = db.prepare("SELECT body, deleted, updated FROM records WHERE kind = 'meeting' AND id = ?")
   const saveMetrics = db.prepare('INSERT INTO metrics (meeting, version, body) VALUES (?, ?, ?) ON CONFLICT (meeting) DO UPDATE SET version = excluded.version, body = excluded.body')
   const dropMetrics = db.prepare('DELETE FROM metrics WHERE meeting = ?')
   const allMetrics = db.prepare('SELECT meeting, body FROM metrics ORDER BY meeting')
@@ -173,6 +180,12 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
     req.on('error', reject)
   })
   const blobPath = (hash) => join(blobs, hash.slice(0, 2), hash)
+  const titleOf = (id) => {
+    const record = meetingRecord.get(id)
+    const hash = record && !record.deleted ? parseManifest(record.body)?.[TITLE] : null
+    if (!hash || hash === RETIRED || !existsSync(blobPath(hash))) return null
+    return cleanTitle(readFileSync(blobPath(hash), 'utf8')) || null
+  }
 
   // Meeting audio carries everyone's voices, biometric data under LGPD, so it's kept for retentionDays from the
   // recording date and then retired: the server writes RETIRED in place of the hash, which devices treat as final
@@ -265,7 +278,33 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
       }
 
       if (req.method === 'GET' && url.pathname === '/metrics') {
-        return send(res, 200, { metrics: allMetrics.all().map((r) => ({ meeting: r.meeting, ...JSON.parse(r.body) })) })
+        return send(res, 200, { metrics: allMetrics.all().map((r) => ({ meeting: r.meeting, ...JSON.parse(r.body), title: titleOf(r.meeting) })) })
+      }
+
+      const rename = url.pathname.match(/^\/meetings\/([^/]+)\/title$/)
+      if (req.method === 'PUT' && rename) {
+        const id = decodeURIComponent(rename[1])
+        const body = await readJSON(req).catch(() => null)
+        const title = typeof body?.title === 'string' ? cleanTitle(body.title) : null
+        if (title == null) return send(res, 400, { error: 'expected { title } as a string of at most 120 characters' })
+        const record = meetingRecord.get(id)
+        if (!record || record.deleted) return send(res, 404, { error: 'no such meeting' })
+        const manifest = parseManifest(record.body)
+        if (!manifest) return send(res, 409, { error: 'meeting record is not a file manifest' })
+        // Clearing stores an empty file rather than dropping the entry: devices never delete a file the
+        // manifest stops listing, so they would push the old title back.
+        const data = Buffer.from(title, 'utf8')
+        const hash = createHash('sha256').update(data).digest('hex')
+        if (!existsSync(blobPath(hash))) {
+          mkdirSync(join(blobs, hash.slice(0, 2)), { recursive: true })
+          const part = join(tmp, `${hash}.${process.pid}.${Date.now()}`)
+          writeFileSync(part, data)
+          renameSync(part, blobPath(hash))
+        }
+        manifest[TITLE] = hash
+        // Newer than the stored version, so it lands even if a device's clock ran ahead.
+        upsert.run('meeting', id, JSON.stringify(manifest), Math.max(now() / 1000, record.updated + 0.001), 0)
+        return send(res, 200, { ok: true, title })
       }
 
       if (req.method === 'POST' && url.pathname === '/records') {
