@@ -1,6 +1,6 @@
 // Deterministic speech metrics for one meeting, from Scribe's word timings. No model, no text in the output:
 // only counts, rates and durations, so results can leave the server while transcripts stay on it.
-export const METRICS_VERSION = 'metrics-v1'
+export const METRICS_VERSION = 'metrics-v2'
 
 // Same as Transcript.pauseBreak in the app: a longer pause starts a new turn.
 const PAUSE_BREAK = 1.0
@@ -73,9 +73,31 @@ export function myTurns(mic) {
   return { mine: micTurns.filter((t) => t.speaker === me), rest: micTurns.filter((t) => t.speaker !== me), speakers: bySpeaker.size }
 }
 
-export function computeMetrics({ mic = [], system = [], meta = null, lexicon }) {
-  const { mine, rest, speakers } = myTurns(mic)
-  const others = [...rest, ...turns(system)]
+/**
+ * The user's turns and everyone else's. With me.json (written by the Mac once speakers are assigned, and
+ * corrected by hand there) the user is whoever spoke inside its spans, on either channel; that's what lets
+ * iPhone meetings, where everyone shares the mic, count. Without it, Mac meetings fall back to the dominant
+ * mic speaker.
+ */
+export function userTurns({ mic = [], system = [], me = null }) {
+  const spans = me?.spans ?? []
+  const speakers = new Set(mic.filter((w) => w.type === 'word').map((w) => w.speaker_id)).size
+  if (!spans.length) {
+    const { mine, rest } = myTurns(mic)
+    return { mine, others: [...rest, ...turns(system)], speakers, attributed: false }
+  }
+  const inside = (w, channel) => spans.some((s) => s.channel === channel && w.start >= s.start - 0.01 && w.end <= s.end + 0.01)
+  const split = (words, channel) => {
+    const timed = words.filter((w) => w.type === 'word' && w.start != null && w.end != null)
+    return { mine: timed.filter((w) => inside(w, channel)), rest: timed.filter((w) => !inside(w, channel)) }
+  }
+  const m = split(mic, 'mic'), s = split(system, 'system')
+  const mineWords = [...m.mine, ...s.mine].sort((a, b) => a.start - b.start).map((w) => ({ ...w, speaker_id: 'me' }))
+  return { mine: turns(mineWords), others: [...turns(m.rest), ...turns(s.rest)], speakers, attributed: true }
+}
+
+export function computeMetrics({ mic = [], system = [], meta = null, me = null, lexicon }) {
+  const { mine, others, speakers, attributed } = userTurns({ mic, system, me })
 
   const words = mine.flatMap((t) => t.words)
   const tokens = words.map((w) => normalize(w.text)).filter(Boolean)
@@ -105,8 +127,11 @@ export function computeMetrics({ mic = [], system = [], meta = null, lexicon }) 
     model_id: meta?.model_id ?? null,
     language: meta?.languages?.mic ?? null,
     mic_speakers: speakers,
-    // Baseline data: Mac meetings, transcribed verbatim, with speech from the user.
-    eligible: meta?.source === 'mac' && verbatim && wordCount > 0,
+    // Whether the user's turns come from me.json (marked on the Mac) rather than the dominant mic voice.
+    attributed,
+    // Baseline data: transcribed verbatim, with speech from the user, from a Mac or from an iPhone meeting
+    // where the Mac has marked which lines are the user's.
+    eligible: verbatim && wordCount > 0 && (meta?.source === 'mac' || attributed),
     my_words: wordCount,
     my_turns: mine.length,
     my_seconds: round(mySeconds, 1),

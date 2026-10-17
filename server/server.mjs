@@ -63,12 +63,12 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
   const jevRows = db.prepare('SELECT meeting, turn, model_id, start, end, words, answers FROM jev WHERE rubric_version = ? ORDER BY meeting, turn')
   const jevQueue = new Map()
   let jevDrain = Promise.resolve()
-  const queueJev = (id, wordsHash, mic, language) => {
+  const queueJev = (id, wordsHash, words, language) => {
     if (!jevKey) return
     const state = jevState.get(id, rubric.version)
     if (state?.words_hash === wordsHash && state.done_at) return
     const idle = jevQueue.size === 0
-    jevQueue.set(id, { wordsHash, mic, language })
+    jevQueue.set(id, { wordsHash, words, language })
     if (idle) jevDrain = drainJev()
   }
   const drainJev = async () => {
@@ -76,7 +76,7 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
       const [id, job] = jevQueue.entries().next().value
       jevQueue.delete(id)
       try {
-        const turns = turnsToClassify(job.mic)
+        const turns = turnsToClassify(job.words)
         const results = []
         // A few turns at a time: fast for a long meeting without tripping the rate limit.
         for (let i = 0; i < turns.length; i += 4) {
@@ -95,6 +95,8 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
       }
     }
   }
+  // What Jev's answers depend on: the words, and which of them are the user's.
+  const wordsKey = (manifest) => ['mic.words.json', 'system.words.json', 'me.json'].map((f) => manifest[f] ?? '').join(':')
   const readBlob = (manifest, name) => {
     const hash = manifest[name]
     if (!hash || !existsSync(blobPath(hash))) return undefined
@@ -112,9 +114,11 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
         return
       }
       const meta = readBlob(manifest, 'meta.json') ?? null
-      const metrics = computeMetrics({ mic, system: readBlob(manifest, 'system.words.json') ?? [], meta, lexicon })
+      const system = readBlob(manifest, 'system.words.json') ?? []
+      const me = readBlob(manifest, 'me.json') ?? null
+      const metrics = computeMetrics({ mic, system, meta, me, lexicon })
       saveMetrics.run(id, metricsVersion, JSON.stringify({ ...metrics, computed_at: new Date().toISOString() }))
-      if (metrics.eligible) queueJev(id, manifest['mic.words.json'], mic, metrics.language)
+      if (metrics.eligible) queueJev(id, wordsKey(manifest), { mic, system, me }, metrics.language)
     } catch (e) {
       // Metrics are derived data: a bad file must never break sync.
       console.error(`metrics for ${id} failed: ${e.message}`)
@@ -161,7 +165,7 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
     const record = meetingRecord.get(meeting)
     const manifest = record && !record.deleted ? JSON.parse(record.body) : {}
     const mic = readBlob(manifest, 'mic.words.json')
-    if (mic) queueJev(meeting, manifest['mic.words.json'], mic, metrics.language)
+    if (mic) queueJev(meeting, wordsKey(manifest), { mic, system: readBlob(manifest, 'system.words.json') ?? [], me: readBlob(manifest, 'me.json') ?? null }, metrics.language)
   }
 
   const server = createServer(async (req, res) => {
