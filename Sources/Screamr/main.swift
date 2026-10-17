@@ -5,6 +5,7 @@ final class App: NSObject, NSApplicationDelegate {
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let fn = FnKey()
     private let recorder = Recorder()
+    private let flowBar = FlowBar()
     private let store = Store.shared
     private let dashboard = DashboardWindow()
     private var ptt = PushToTalk()
@@ -28,6 +29,7 @@ final class App: NSObject, NSApplicationDelegate {
         status.menu = menu
         setIcon("mic")
         NSApp.mainMenu = mainMenu()
+        flowBar.level = { [recorder] in recorder.level }
         syncNow()
         Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in self?.syncNow() }
 
@@ -84,6 +86,7 @@ final class App: NSObject, NSApplicationDelegate {
         case .start: begin()
         case .lock:
             NSSound(named: "Morse")?.play()
+            flowBar.show(.locked)
             stateItem.title = "Hands-free: press Fn to finish, Esc to cancel"
         case .finish: finish()
         case .cancel:
@@ -102,6 +105,7 @@ final class App: NSObject, NSApplicationDelegate {
             recording = true
             targetApp = NSWorkspace.shared.frontmostApplication?.localizedName
             NSSound(named: "Tink")?.play()
+            flowBar.show(.listening)
             setIcon("mic.fill")
             stateItem.title = "Listening..."
         } catch {
@@ -117,6 +121,7 @@ final class App: NSObject, NSApplicationDelegate {
         // Very short locked takes are accidental; don't bill a transcription for them.
         guard take.seconds > 0.3, let key = Store.apiKey() else { return idle() }
         setIcon("ellipsis")
+        flowBar.show(.transcribing)
         stateItem.title = "Transcribing..."
         let app = targetApp
         Task { @MainActor in
@@ -260,12 +265,14 @@ final class App: NSObject, NSApplicationDelegate {
     }
 
     private func idle() {
+        flowBar.hide()
         setIcon("mic")
         stateItem.title = "Hold Fn to dictate"
     }
 
     private func fail(_ message: String) {
         NSLog("screamr: %@", message)
+        flowBar.hide()
         setIcon("mic.slash")
         stateItem.title = message
     }
