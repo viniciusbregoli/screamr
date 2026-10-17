@@ -12,7 +12,7 @@ const say = (text, speaker, start) => text.split(' ').map((t, i) => ({ text: t, 
 
 test('only the dominant mic speaker turns of three words or more are classified', () => {
   const mic = [...say('Eu acho que dá para entregar sexta.', 'speaker_0', 0), ...say('Ok.', 'speaker_0', 5), ...say('Someone in the room', 'speaker_1', 9)]
-  const turns = turnsToClassify(mic)
+  const turns = turnsToClassify({ mic })
   assert.deepEqual(turns.map((t) => t.text), ['Eu acho que dá para entregar sexta.'])
 })
 
@@ -79,10 +79,17 @@ test('baseline meetings are classified in the background, once per words version
     await s.jevIdle()
     assert.equal(sent.length, 2)
 
-    // An iPhone meeting is not baseline data, so it never reaches Jev.
-    await post([{ kind: 'meeting', id: 'm2', body: JSON.stringify({ ...manifest, 'meta.json': await put({ transcription_mode: 'verbatim', source: 'iphone' }) }), updated: 3 }])
+    // An iPhone meeting where the Mac hasn't marked the user's lines is not baseline data: no Jev.
+    const iphone = { ...manifest, 'meta.json': await put({ transcription_mode: 'verbatim', source: 'iphone' }) }
+    await post([{ kind: 'meeting', id: 'm2', body: JSON.stringify(iphone), updated: 3 }])
     await s.jevIdle()
     assert.equal(sent.length, 2)
+
+    // Once the user's lines are marked (me.json), it counts, and only the marked line is sent.
+    await post([{ kind: 'meeting', id: 'm2', body: JSON.stringify({ ...iphone, 'me.json': await put({ spans: [{ channel: 'mic', start: 10, end: 11.5 }] }) }), updated: 4 }])
+    await s.jevIdle()
+    assert.equal(sent.length, 3)
+    assert.equal(sent[2].state.turn, 'Acho que talvez dê.')
   } finally {
     await s.close()
     rmSync(dir, { recursive: true, force: true })

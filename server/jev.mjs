@@ -1,14 +1,14 @@
 // Classifies the user's meeting turns with Jev (TypeSafe System One) against a versioned rubric.
 // Only the user's own turns leave the server: never the other side of the call.
-import { myTurns } from './metrics.mjs'
+import { userTurns } from './metrics.mjs'
 
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
 // Turns this short ("Sim.", "Ok, beleza.") carry no position worth classifying.
 const MIN_WORDS = 3
 
 /** The user's turns worth classifying, with their text and position in the meeting. */
-export function turnsToClassify(mic) {
-  return myTurns(mic).mine
+export function turnsToClassify({ mic = [], system = [], me = null }) {
+  return userTurns({ mic, system, me }).mine
     .map((t, index) => ({ index, start: t.start, end: t.end, words: t.words.length, text: t.words.map((w) => w.text).join(' ') }))
     .filter((t) => t.words >= MIN_WORDS)
 }

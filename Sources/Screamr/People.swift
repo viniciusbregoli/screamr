@@ -15,6 +15,10 @@ struct Person: Codable, Identifiable, Hashable {
     var quote = ""
     /// People merged into this one; their old meeting assignments still resolve here.
     var mergedIDs: [UUID] = []
+    /// The user. Optional, like `prints`, so people saved before these existed still load.
+    var isMe: Bool?
+    /// The fingerprint each meeting contributed, so a correction can move it to the right person.
+    var prints: [String: [Float]]?
 
     var displayName: String { name.isEmpty ? "Unknown \(number)" : name }
 }
@@ -31,9 +35,28 @@ enum PeopleMatcher {
         return best.0
     }
 
-    static func absorb(_ voice: [Float], into person: inout Person) {
-        person.voice = VoicePrinter.mean([person.voice.map { $0 * Float(person.samples) }, voice])
-        person.samples += 1
+    static func absorb(_ voice: [Float], into person: inout Person, meeting: String? = nil) {
+        // Someone added by hand starts with no voice, so their first sample is their whole profile.
+        person.voice = person.voice.isEmpty ? voice : VoicePrinter.mean([person.voice.map { $0 * Float(person.samples) }, voice])
+        person.samples = person.voice == voice ? max(person.samples, 1) : person.samples + 1
+        if let meeting { person.prints = (person.prints ?? [:]).merging([meeting: voice]) { _, new in new } }
+    }
+
+    /// Takes a meeting's fingerprint back out of a person, e.g. when a correction says that voice was
+    /// someone else. Returns it so it can be added to the right person.
+    static func release(meeting: String, from person: inout Person) -> [Float]? {
+        guard let print = person.prints?[meeting] else { return nil }
+        let before = person.samples
+        person.prints?[meeting] = nil
+        person.samples = max(1, before - 1)
+        if let prints = person.prints, !prints.isEmpty, prints.count == person.samples {
+            person.voice = VoicePrinter.mean(Array(prints.values))
+        } else if before > 1 {
+            // ponytail: the stored voice is a normalized mean, so subtracting from it is approximate;
+            // exact once every sample a person has comes from a meeting with a stored fingerprint.
+            person.voice = VoicePrinter.mean([person.voice.map { $0 * Float(before) }, print.map { -$0 }])
+        }
+        return print
     }
 
     /// Folds `source` into `target`, keeping its history and voice weight.
@@ -45,6 +68,8 @@ enum PeopleMatcher {
         if target.quote.isEmpty { target.quote = source.quote }
         if target.name.isEmpty { target.name = source.name }
         target.mergedIDs += [source.id] + source.mergedIDs
+        if let prints = source.prints { target.prints = (target.prints ?? [:]).merging(prints) { mine, _ in mine } }
+        if source.isMe == true { target.isMe = true }
     }
 
     /// Time ranges per diarized speaker, merging words separated by short pauses.

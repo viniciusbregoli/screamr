@@ -50,3 +50,13 @@ private func w(_ text: String, _ start: Double, _ speaker: String = "speaker_0")
     let phone = Transcript.labels(mic: [w("speaker_0")], system: [], micName: Transcript.systemName)
     #expect(phone == ["mic:speaker_0": "Speaker 1"])
 }
+
+@Test func aLineOverrideRelabelsOnlyThatLine() {
+    let w = { (text: String, id: String, start: Double) in Transcript.Word(text: text, start: start, end: start + 0.5, type: "word", speaker_id: id) }
+    let mic = [w("Hello", "speaker_0", 0), w("there", "speaker_0", 5), w("again", "speaker_0", 10)]
+    let labels = ["mic:speaker_0": "You", "line:mic:5.00": "Ana"]
+    let lines = Transcript.merged(mic: mic, system: [], labels: labels)
+    #expect(lines.map(\.speaker) == ["You", "Ana", "You"])
+    #expect(lines[1].lineKey == "mic:5.00")
+    #expect(Transcript.markdown(title: "T", mic: mic, system: [], names: labels).contains("Ana:** there"))
+}

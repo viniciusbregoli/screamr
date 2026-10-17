@@ -43,3 +43,18 @@ test('fillers only count in verbatim meetings, and only Mac verbatim meetings ar
   assert.equal(computeMetrics({ mic, meta: { ...meta, source: 'iphone' }, lexicon }).eligible, false)
   assert.equal(computeMetrics({ mic, meta: null, lexicon }).transcription_mode, 'unknown')
 })
+
+test('marked lines decide who the user is, on either channel, and make iPhone meetings count', () => {
+  // iPhone: everyone on the mic. Scribe called both people speaker_0; the Mac marked only the second line as the user's.
+  const mic = [...say('Bom dia, tudo bem?', 'speaker_0', 0), ...say('Eu acho que dá para entregar sexta.', 'speaker_0', 5)]
+  const iphone = { ...meta, source: 'iphone' }
+  const unmarked = computeMetrics({ mic, meta: iphone, lexicon })
+  assert.equal(unmarked.eligible, false)
+  assert.equal(unmarked.attributed, false)
+  const marked = computeMetrics({ mic, meta: iphone, me: { spans: [{ channel: 'mic', start: 5, end: 7.8 }] }, lexicon })
+  assert.equal(marked.attributed, true)
+  assert.equal(marked.eligible, true)
+  assert.equal(marked.my_words, 7)
+  assert.deepEqual(marked.hedges.by_phrase, { acho: 1 })
+  assert.equal(marked.others_seconds, 1.5)
+})

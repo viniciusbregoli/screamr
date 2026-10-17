@@ -435,11 +435,18 @@ private struct MeetingsPane: View {
     @ObservedObject var store: Store
     let actions: DashboardActions
     @State private var selection: MeetingInfo.ID?
+    /// Bumped after a correction, since a line fix rewrites files without changing the store.
+    @State private var edits = 0
     @Environment(\.zoom) private var zoom
     // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
     private static var colors: [Color] { [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender] }
 
     private var selected: MeetingInfo? { store.meetings.first { $0.id == selection } }
+
+    /// Who to offer in the correction menu: the user first, then whoever shows up most.
+    private var people: [Person] {
+        store.people.sorted { ($0.id == store.me?.id ? 1 : 0, $0.meetings.count) > ($1.id == store.me?.id ? 1 : 0, $1.meetings.count) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -517,7 +524,7 @@ private struct MeetingsPane: View {
                             let s = segments[i]
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 8) {
-                                    Text(s.speaker).zfont(12, .semibold).foregroundStyle(Self.colors[(speakers.firstIndex(of: s.speaker) ?? 0) % Self.colors.count])
+                                    speakerMenu(m, s, color: Self.colors[(speakers.firstIndex(of: s.speaker) ?? 0) % Self.colors.count])
                                     Text(clock(s.start)).zfont(11).monospacedDigit().foregroundStyle(Theme.overlay2)
                                 }
                                 Text(TextRules.apply(s.text, replacements: store.replacements)).textSelection(.enabled)
@@ -535,7 +542,62 @@ private struct MeetingsPane: View {
     }
 
     /// The same labels the transcript file uses: recognized names first, then channel defaults.
+    /// Click a name to fix who said it: just this line (Scribe merged two voices), or this speaker
+    /// everywhere in the meeting (the voice was matched to the wrong person).
+    private func speakerMenu(_ m: MeetingInfo, _ s: Transcript.Segment, color: Color) -> some View {
+        let lineFixed = Meeting.loadIDs(m.dir, "lines.json")[s.lineKey] != nil
+        return Menu {
+            Section("This line") {
+                ForEach(people) { p in Button(label(p)) { fix(m) { try Meeting.assign(dir: m.dir, title: m.title, line: s.lineKey, to: p.id, store: store) } } }
+                Button("New person") { let id = newPerson(); fix(m) { try Meeting.assign(dir: m.dir, title: m.title, line: s.lineKey, to: id, store: store) } }
+                if lineFixed {
+                    Button("Back to automatic") { fix(m) { try Meeting.assign(dir: m.dir, title: m.title, line: s.lineKey, to: nil, store: store) } }
+                }
+            }
+            Section("Everywhere in this meeting") {
+                ForEach(people) { p in
+                    Button(label(p)) { fixAsync(m) { try await Meeting.assign(dir: m.dir, title: m.title, speaker: "\(s.channel):\(s.speakerID)", to: p.id, store: store) } }
+                }
+                Button("New person") {
+                    let id = newPerson()
+                    fixAsync(m) { try await Meeting.assign(dir: m.dir, title: m.title, speaker: "\(s.channel):\(s.speakerID)", to: id, store: store) }
+                }
+            }
+        } label: {
+            Text(s.speaker).zfont(12, .semibold).foregroundStyle(color)
+                .underline(lineFixed, color: color.opacity(0.5))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Wrong person? Click to fix who said this.")
+    }
+
+    private func label(_ p: Person) -> String { p.id == store.me?.id && p.displayName != "You" ? "\(p.displayName) (you)" : p.displayName }
+
+    private func newPerson() -> UUID {
+        let person = Person(number: (store.people.map(\.number).max() ?? 0) + 1, voice: [], samples: 0)
+        store.people.append(person)
+        return person.id
+    }
+
+    private func fix(_ m: MeetingInfo, _ change: () throws -> Void) {
+        do { try change() } catch { NSLog("screamr: fixing a speaker failed, %@", error.localizedDescription) }
+        edits += 1
+        actions.syncNow()
+    }
+
+    private func fixAsync(_ m: MeetingInfo, _ change: @escaping () async throws -> Void) {
+        Task { @MainActor in
+            do { try await change() } catch { NSLog("screamr: fixing a speaker failed, %@", error.localizedDescription) }
+            edits += 1
+            actions.syncNow()
+        }
+    }
+
     private func segments(_ m: MeetingInfo) -> [Transcript.Segment] {
+        _ = edits
         let mic = Meeting.loadWords(m.dir, "mic"), system = Meeting.loadWords(m.dir, "system")
         let names = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: m.dir.appendingPathComponent("names.json"))))
         return Transcript.merged(mic: mic, system: system, labels: names ?? Transcript.labels(mic: mic, system: system))
@@ -568,7 +630,8 @@ private struct PeoplePane: View {
                     VStack(spacing: 8) {
                         ForEach(sorted) { p in
                             PersonRow(person: p, others: sorted.filter { $0.id != p.id },
-                                      rename: { rename(p.id, to: $0) }, merge: { merge(p.id, into: $0) }, delete: { delete(p.id) })
+                                      rename: { rename(p.id, to: $0) }, merge: { merge(p.id, into: $0) }, delete: { delete(p.id) },
+                                      isMe: p.id == store.me?.id, markMe: { markMe(p.id) })
                         }
                     }
                 }
@@ -592,6 +655,12 @@ private struct PeoplePane: View {
         rerender(meetings)
     }
 
+    /// Which person is the user decides whose lines feed the speech metrics, in every meeting.
+    private func markMe(_ id: UUID) {
+        for i in store.people.indices { store.people[i].isMe = store.people[i].id == id ? true : false }
+        rerender(store.meetings.map(\.dir.lastPathComponent))
+    }
+
     private func delete(_ id: UUID) {
         guard let i = store.people.firstIndex(where: { $0.id == id }) else { return }
         let meetings = store.people[i].meetings
@@ -613,6 +682,8 @@ private struct PersonRow: View {
     let rename: (String) -> Void
     let merge: (UUID) -> Void
     let delete: () -> Void
+    var isMe = false
+    var markMe: () -> Void = {}
     @State private var draft = ""
     @FocusState private var editing: Bool
     // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
@@ -656,6 +727,11 @@ private struct PersonRow: View {
             .fixedSize()
             .disabled(others.isEmpty)
             .help("Same person split in two? Merge them.")
+            Button(action: markMe) { Image(systemName: isMe ? "person.crop.circle.fill.badge.checkmark" : "person.crop.circle.badge.checkmark") }
+                .buttonStyle(.plain)
+                .foregroundStyle(isMe ? Theme.green : Theme.overlay1)
+                .help(isMe ? "This is you: your lines feed the speech metrics" : "This is me")
+                .disabled(isMe)
             Button { delete() } label: { Image(systemName: "trash") }
                 .buttonStyle(.plain).foregroundStyle(Theme.overlay1).help("Forget this person")
         }
