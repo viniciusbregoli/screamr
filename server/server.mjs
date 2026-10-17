@@ -13,6 +13,16 @@ import { loadRubric } from './rubric.mjs'
 export const RETIRED = 'retired'
 const AUDIO = ['mic.m4a', 'system.m4a']
 
+/** A meeting's files, `{ name: sha256 | "retired" }`, or null when the body isn't one. */
+export function parseManifest(body) {
+  try {
+    const m = JSON.parse(body)
+    return m && typeof m === 'object' && !Array.isArray(m) && Object.values(m).every((v) => typeof v === 'string') ? m : null
+  } catch {
+    return null
+  }
+}
+
 /** A meeting's recording time from its folder name, "yyyy-MM-dd HH.mm.ss" (older ones without seconds), in local time. */
 export function meetingDate(id) {
   const m = id.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2})\.(\d{2})(?:\.(\d{2}))?$/)
@@ -175,7 +185,11 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
       if (r.kind !== 'meeting') continue
       const recorded = meetingDate(r.id)
       if (recorded == null || recorded > cutoff) continue
-      const manifest = JSON.parse(r.body)
+      const manifest = parseManifest(r.body)
+      if (!manifest) {
+        console.error(`retention skipped ${r.id}: its record is not a file manifest`)
+        continue
+      }
       const audio = AUDIO.filter((f) => manifest[f] && manifest[f] !== RETIRED)
       if (!audio.length) continue
       for (const f of audio) manifest[f] = RETIRED
@@ -186,7 +200,12 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
   // Only blobs older than a day, since devices upload a meeting's files before posting its record.
   const collectGarbage = () => {
     const referenced = new Set()
-    for (const r of liveRecords.all()) for (const v of Object.values(JSON.parse(r.body))) referenced.add(v)
+    for (const r of liveRecords.all()) {
+      const manifest = parseManifest(r.body)
+      // A record we can't read might reference anything, so collect nothing rather than guess.
+      if (!manifest) return console.error(`garbage collection skipped: record ${r.id} is not a file manifest`)
+      for (const v of Object.values(manifest)) referenced.add(v)
+    }
     // An empty or broken database must never read as "nothing is referenced".
     if (!referenced.size) return
     const youngest = now() - 86_400_000
@@ -256,6 +275,10 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
           for (const r of records) {
             if (typeof r.kind !== 'string' || typeof r.id !== 'string' || typeof r.body !== 'string' || typeof r.updated !== 'number') {
               throw new Error('record needs kind, id, body (string) and updated (number)')
+            }
+            // Retention and garbage collection read every meeting's manifest, so a broken one is refused here.
+            if (r.kind === 'meeting' && !r.deleted && !parseManifest(r.body)) {
+              throw new Error(`meeting ${r.id}: body must be a JSON object of file names to hashes`)
             }
             upsert.run(r.kind, r.id, r.body, r.updated, r.deleted ? 1 : 0)
           }

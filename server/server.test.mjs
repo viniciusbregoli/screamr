@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, rmSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { meetingDate, RETIRED, start } from './server.mjs'
+import { meetingDate, parseManifest, RETIRED, start } from './server.mjs'
 
 test('records keep the latest edit, blobs are checked against their hash', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'screamr-sync-'))
@@ -16,11 +16,11 @@ test('records keep the latest edit, blobs are checked against their hash', async
     assert.equal((await fetch(`${base}/changes`)).status, 401)
     assert.equal((await fetch(`${base}/changes`, { headers: { authorization: 'Bearer nope' } })).status, 401)
 
-    await post([{ kind: 'meeting', id: 'a', body: '{"v":2}', updated: 2 }])
-    await post([{ kind: 'meeting', id: 'a', body: '{"v":1}', updated: 1 }]) // older: ignored
+    await post([{ kind: 'meeting', id: 'a', body: '{"v":"2"}', updated: 2 }])
+    await post([{ kind: 'meeting', id: 'a', body: '{"v":"1"}', updated: 1 }]) // older: ignored
     const { cursor } = await post([{ kind: 'meeting', id: 'b', body: '{}', updated: 5 }])
     const all = await fetch(`${base}/changes?since=0`, { headers: auth }).then((r) => r.json())
-    assert.deepEqual(all.records.map((r) => [r.id, r.body]), [['a', '{"v":2}'], ['b', '{}']])
+    assert.deepEqual(all.records.map((r) => [r.id, r.body]), [['a', '{"v":"2"}'], ['b', '{}']])
     assert.equal(all.cursor, cursor)
     const later = await fetch(`${base}/changes?since=${cursor}`, { headers: auth }).then((r) => r.json())
     assert.equal(later.records.length, 0)
@@ -127,4 +127,19 @@ test('meeting dates come from the folder name, with or without seconds', () => {
   assert.equal(meetingDate('2026-10-17 09.30.15'), new Date(2026, 9, 17, 9, 30, 15).getTime())
   assert.equal(meetingDate('2026-10-17 09.30'), new Date(2026, 9, 17, 9, 30).getTime())
   assert.equal(meetingDate('not a meeting'), null)
+})
+
+test('a meeting record must be a file manifest, so retention can always read it', async () => {
+  assert.deepEqual(parseManifest('{"mic.m4a":"abc","system.m4a":"retired"}'), { 'mic.m4a': 'abc', 'system.m4a': 'retired' })
+  for (const bad of ['not json', '[]', 'null', '{"mic.m4a":1}']) assert.equal(parseManifest(bad), null)
+  const dir = mkdtempSync(join(tmpdir(), 'screamr-sync-'))
+  const s = await start({ dataDir: dir, token: 't' })
+  try {
+    const post = (records) => fetch(`http://127.0.0.1:${s.port}/records`, { method: 'POST', headers: { authorization: 'Bearer t' }, body: JSON.stringify(records) })
+    assert.equal((await post([{ kind: 'meeting', id: 'x', body: 'not json', updated: 1 }])).status, 400)
+    assert.equal((await post([{ kind: 'meeting', id: 'x', body: '{}', updated: 2, deleted: true }])).status, 200) // tombstones carry no manifest
+  } finally {
+    await s.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
