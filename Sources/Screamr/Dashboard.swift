@@ -747,6 +747,8 @@ private struct SettingsPane: View {
     @State private var refresh = 0
     @AppStorage(Recorder.inputKey) private var input = ""
     @AppStorage(CorrectionWatcher.enabledKey) private var learnCorrections = true
+    @AppStorage(Scribe.meetingVerbatimKey) private var meetingVerbatim = true
+    @AppStorage(Scribe.dictationVerbatimKey) private var dictationVerbatim = false
     @AppStorage(Theme.key) private var theme = "mocha"
     @Environment(\.zoom) private var zoom
 
@@ -811,6 +813,14 @@ private struct SettingsPane: View {
                     }
                     .frame(maxWidth: 420)
                     Text("Used for dictation and meetings, from the next recording on.").zfont(11).foregroundStyle(Theme.subtext0)
+                }
+                group("Transcription") {
+                    Toggle("Meetings: keep fillers and false starts (verbatim)", isOn: $meetingVerbatim)
+                    Text("Keeps \u{201C}um\u{201D}, \u{201C}é\u{201D}, \u{201C}hum\u{201D} and restarts, which speech analysis measures. Each meeting saves the mode it used in meta.json; re-transcribing uses the current setting.")
+                        .zfont(11).foregroundStyle(Theme.subtext0).fixedSize(horizontal: false, vertical: true)
+                    Toggle("Dictation: keep fillers and false starts (verbatim)", isOn: $dictationVerbatim)
+                    Text("Off by default, so pasted text comes out clean.")
+                        .zfont(11).foregroundStyle(Theme.subtext0)
                 }
                 group("General") {
                     Toggle("Launch screamr at login", isOn: $launchAtLogin)
