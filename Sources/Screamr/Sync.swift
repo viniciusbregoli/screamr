@@ -24,6 +24,8 @@ actor SyncEngine {
         /// What each meeting looked like after the last sync, on this device and on the server.
         var base: [String: Manifest] = [:]
         var pendingDeletes: Set<String> = []
+        /// Highest change number the server has confirmed, including this device's own writes.
+        var seen = 0
     }
 
     struct Record: Codable {
@@ -36,6 +38,10 @@ actor SyncEngine {
 
     private struct Changes: Decodable {
         let records: [Record]
+        let cursor: Int
+    }
+
+    private struct Posted: Decodable {
         let cursor: Int
     }
 
@@ -63,8 +69,13 @@ actor SyncEngine {
     func run(_ config: Config, skip: Set<String> = []) async throws -> [(dir: URL, files: [String])] {
         var state = load()
         var changes = try await changes(config, since: state.cursor)
-        // A server restored from backup is behind this device; re-read everything; merging is idempotent.
-        if changes.cursor < state.cursor { changes = try await self.changes(config, since: 0) }
+        // A server restored from backup is behind what this device saw: forget the last synced state and
+        // merge everything again, so local files missing from the backup are pushed back. Merging is idempotent.
+        if changes.cursor < max(state.cursor, state.seen) {
+            state.base = [:]
+            changes = try await self.changes(config, since: 0)
+        }
+        state.seen = changes.cursor
 
         var remote: [String: Manifest] = [:]
         var deletedRemotely: Set<String> = []
@@ -108,7 +119,7 @@ actor SyncEngine {
         if !outgoing.isEmpty {
             var req = request(config, "POST", config.url.appendingPathComponent("records"))
             req.httpBody = try JSONEncoder().encode(outgoing)
-            _ = try await send(config, req)
+            state.seen = try JSONDecoder().decode(Posted.self, from: try await send(config, req)).cursor
         }
         state.pendingDeletes = []
         // Our own writes come back next time as no-ops, since they already match `base`.
