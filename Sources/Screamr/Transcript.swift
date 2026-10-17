@@ -98,3 +98,26 @@ enum Transcript {
         return md
     }
 }
+
+/// A meeting's own name, kept in title.txt so it syncs between devices like any other meeting file.
+enum MeetingTitle {
+    static let file = "title.txt"
+    static let maxLength = 120
+
+    /// One line, trimmed, at most 120 characters. Empty means the meeting has no title.
+    static func clean(_ raw: String) -> String {
+        String(raw.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces).prefix(maxLength))
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    static func read(_ dir: URL) -> String? {
+        let title = clean((try? String(contentsOf: dir.appendingPathComponent(file), encoding: .utf8)) ?? "")
+        return title.isEmpty ? nil : title
+    }
+
+    /// Clearing writes an empty file instead of deleting it: sync never propagates a removed file,
+    /// so another device would bring the old title back.
+    static func write(_ title: String, to dir: URL) throws {
+        try clean(title).write(to: dir.appendingPathComponent(file), atomically: true, encoding: .utf8)
+    }
+}
