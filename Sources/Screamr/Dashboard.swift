@@ -918,27 +918,6 @@ private struct ThemeSwatch: View {
     }
 }
 
-/// Neon only: two soft lights drifting behind the sidebar. Still when Reduce Motion is on.
-private struct NeonAmbient: View {
-    @State private var drift = false
-
-    var body: some View {
-        GeometryReader { g in
-            ZStack {
-                Circle().fill(Theme.mauve.opacity(0.22)).frame(width: 220).blur(radius: 70)
-                    .position(x: g.size.width * (drift ? 0.85 : 0.15), y: g.size.height * (drift ? 0.3 : 0.08))
-                Circle().fill(Theme.lavender.opacity(0.15)).frame(width: 240).blur(radius: 80)
-                    .position(x: g.size.width * (drift ? 0.15 : 0.8), y: g.size.height * (drift ? 0.75 : 0.95))
-            }
-        }
-        .allowsHitTesting(false)
-        .onAppear {
-            guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-            withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) { drift = true }
-        }
-    }
-}
-
 private struct ShortcutTable: View {
     var body: some View {
         Grid(alignment: .leading, verticalSpacing: 8) {
