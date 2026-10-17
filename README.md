@@ -48,8 +48,22 @@ ios/run.sh          # booted simulator
 ios/run.sh device   # connected iPhone (or DEVICE=<udid>)
 ```
 
+## Sync
+
+Meetings sync between the Mac and the iPhone through a small server you run yourself (`server/server.mjs`: Node, no dependencies, built-in SQLite). Each meeting is a record listing its files by SHA-256, and the files are uploaded once as blobs. Every file merges against the last synced version: a change on one device is pushed, a change on the other is downloaded, and files only disappear when the meeting is deleted.
+
+- **iPhone recordings** reach the Mac, which recognizes the speakers; their names come back in `names.json`, so the phone shows them too.
+- **Mac meetings** reach the iPhone as transcripts. Audio stays on the device that recorded it, plus the server.
+- **When:** the Mac syncs on launch, every 5 minutes and after each transcription; the iPhone when opened, after a transcription and on pull-to-refresh.
+- **Settings:** server URL and token, on the Mac in Settings > Sync (stored in `~/.config/screamr/sync.json`, mode 600), on the iPhone in Settings (token in the Keychain).
+
+Deploying, as on munchkin: copy `server/server.mjs` to `~/services/screamr-sync/app/`, put `SCREAMR_SYNC_TOKEN=$(openssl rand -hex 32)` in `~/services/screamr-sync/.env`, run it as a read-only `node:26-alpine` container with `./screamr-sync/data` mounted at `/data`, and expose it to the tailnet only with `tailscale serve --bg --https=8796 http://127.0.0.1:8796`.
+
+Backups: the data folder sits under `~/services`, which the nightly restic job already sends to B2. Restore `data/snapshot/sync.db` (a consistent copy refreshed hourly) as `data/sync.db`, plus `data/blobs/`. Devices notice the server is behind them and push back anything newer than the backup.
+
 ## Test
 
 ```sh
 swift test
+node --test server/
 ```
