@@ -13,5 +13,8 @@ export function loadRubric(dir = RUBRIC_DIR) {
     .filter((x) => Number.isInteger(x.n))
     .sort((a, b) => b.n - a.n)[0]
   if (!latest) throw new Error(`no rubric vN.json in ${dir}`)
-  return JSON.parse(readFileSync(join(dir, latest.f), 'utf8'))
+  const rubric = JSON.parse(readFileSync(join(dir, latest.f), 'utf8'))
+  // Answers are stored per version: a copied file that still says the old version would reuse its answers.
+  if (rubric.version !== `rubric-v${latest.n}`) throw new Error(`${latest.f} declares version ${rubric.version}, expected rubric-v${latest.n}`)
+  return rubric
 }

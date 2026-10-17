@@ -16,6 +16,17 @@ test('the highest-numbered rubric file is active, compared as numbers', () => {
   }
 })
 
+test('a rubric whose declared version differs from its filename is refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rubric-'))
+  try {
+    writeFileSync(join(dir, 'v1.json'), JSON.stringify({ version: 'rubric-v1' }))
+    writeFileSync(join(dir, 'v2.json'), JSON.stringify({ version: 'rubric-v1' })) // copied, not updated
+    assert.throws(() => loadRubric(dir), /v2\.json declares version rubric-v1, expected rubric-v2/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('the shipped rubric loads', () => {
   assert.match(loadRubric().version, /^rubric-v\d+$/)
 })
