@@ -153,11 +153,15 @@ struct MeetingRow: View {
 struct MeetingView: View {
     @Environment(Library.self) private var library
     @Environment(MeetingRecorder.self) private var recorder
+    // Read in body so an open transcript redraws in the new theme's colors.
+    @AppStorage(Theme.key) private var theme = "mocha"
     let meeting: MeetingFolder
 
-    private static let colors = [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender]
+    // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
+    private static var colors: [Color] { [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender] }
 
     var body: some View {
+        let _ = theme
         let segments = library.transcribing.contains(meeting.dir) ? [] : meeting.segments
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
@@ -230,7 +234,8 @@ struct SettingsView: View {
                         Button { theme = p.id } label: {
                             HStack(spacing: 12) {
                                 HStack(spacing: 4) {
-                                    ForEach([p.mauve, p.blue, p.green, p.yellow, p.red], id: \.self) { hex in
+                                    // By position: palettes can repeat a color.
+                                    ForEach(Array([p.mauve, p.blue, p.green, p.yellow, p.red].enumerated()), id: \.offset) { _, hex in
                                         Circle().fill(Color(hex: hex)).frame(width: 9, height: 9)
                                             .shadow(color: p.glows ? Color(hex: hex).opacity(0.9) : .clear, radius: 3)
                                     }

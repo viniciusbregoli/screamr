@@ -139,8 +139,17 @@ struct NeonAmbient: View {
             }
         }
         .allowsHitTesting(false)
-        .onAppear {
-            guard !reduceMotion else { return }
+        .onAppear(perform: animate)
+        .onChange(of: reduceMotion) { animate() }
+    }
+
+    /// Also runs when Reduce Motion changes, so the lights stop (or start) right away.
+    private func animate() {
+        if reduceMotion {
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { drift = false }
+        } else {
             withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) { drift = true }
         }
     }

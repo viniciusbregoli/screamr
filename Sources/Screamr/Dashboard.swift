@@ -436,7 +436,8 @@ private struct MeetingsPane: View {
     let actions: DashboardActions
     @State private var selection: MeetingInfo.ID?
     @Environment(\.zoom) private var zoom
-    private static let colors = [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender]
+    // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
+    private static var colors: [Color] { [Theme.mauve, Theme.peach, Theme.teal, Theme.pink, Theme.blue, Theme.yellow, Theme.green, Theme.lavender] }
 
     private var selected: MeetingInfo? { store.meetings.first { $0.id == selection } }
 
@@ -614,7 +615,8 @@ private struct PersonRow: View {
     let delete: () -> Void
     @State private var draft = ""
     @FocusState private var editing: Bool
-    private static let colors = [Theme.mauve, Theme.blue, Theme.green, Theme.peach, Theme.pink, Theme.teal, Theme.yellow, Theme.lavender]
+    // Computed, so a theme change is picked up: a stored static would keep the first theme's colors.
+    private static var colors: [Color] { [Theme.mauve, Theme.blue, Theme.green, Theme.peach, Theme.pink, Theme.teal, Theme.yellow, Theme.lavender] }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -903,7 +905,8 @@ private struct ThemeSwatch: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 5) {
-                ForEach([palette.mauve, palette.blue, palette.green, palette.yellow, palette.red], id: \.self) { hex in
+                // By position: palettes can repeat a color.
+                ForEach(Array([palette.mauve, palette.blue, palette.green, palette.yellow, palette.red].enumerated()), id: \.offset) { _, hex in
                     Circle().fill(Color(hex: hex)).frame(width: 10, height: 10)
                         .shadow(color: palette.glows ? Color(hex: hex).opacity(0.9) : .clear, radius: 4)
                 }
