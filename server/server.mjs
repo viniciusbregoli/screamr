@@ -122,7 +122,8 @@ export function start({ dataDir, token, port = 0, host = '127.0.0.1', lexicon = 
     }
   }
   // What Jev's answers depend on: the words, and which of them are the user's.
-  const wordsKey = (manifest) => ['mic.words.json', 'system.words.json', 'me.json'].map((f) => manifest[f] ?? '').join(':')
+  // The metrics version is part of the key because it decides where turns split: a new split re-classifies them.
+  const wordsKey = (manifest) => [METRICS_VERSION, ...['mic.words.json', 'system.words.json', 'me.json'].map((f) => manifest[f] ?? '')].join(':')
   const readBlob = (manifest, name) => {
     const path = storedBlob(manifest[name])
     return path ? JSON.parse(readFileSync(path, 'utf8')) : undefined

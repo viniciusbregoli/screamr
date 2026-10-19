@@ -1,9 +1,14 @@
 // Deterministic speech metrics for one meeting, from Scribe's word timings. No model, no text in the output:
 // only counts, rates and durations, so results can leave the server while transcripts stay on it.
-export const METRICS_VERSION = 'metrics-v2'
+export const METRICS_VERSION = 'metrics-v3'
 
-// Same as Transcript.pauseBreak in the app: a longer pause starts a new turn.
+// Same as Transcript.pauseBreak in the app: a longer pause starts a new turn, unless it falls inside a sentence
+// (see joinUnfinished). The app's transcript keeps splitting at every pause, since it only orders the lines.
 const PAUSE_BREAK = 1.0
+// Past this, even an unfinished sentence ends the turn: the thought was dropped, not paused.
+const MID_SENTENCE_PAUSE = 10
+// Scribe closes a sentence with one of these; a turn that stops before one was cut by a pause for thought.
+const endsSentence = (text) => /[.!?…]["'”»)\]]*$/u.test(text)
 
 const normalize = (text) => text.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
 const endsAlone = (text) => /[,.!?;:…]$/u.test(text)
@@ -24,7 +29,30 @@ function turns(words) {
   return out
 }
 
-const seconds = (ts) => ts.reduce((s, t) => s + (t.end - t.start), 0)
+/**
+ * Joins the user's turns that a pause cut mid-sentence ("vai ser o-- [1.2 s] qual o trampo que é fazer isso"),
+ * as long as nobody else spoke in the gap. Each half alone reads as a fragment and skews its classification.
+ */
+function joinUnfinished(mine, others) {
+  const heard = others.flatMap((t) => t.words)
+  const out = []
+  for (const t of mine) {
+    const last = out.at(-1)
+    // Any word of theirs that overlaps the gap, not only one that starts inside it.
+    const interrupted = last && heard.some((w) => w.start < t.start && w.end > last.end)
+    if (last && !endsSentence(last.words.at(-1).text) && t.start - last.end < MID_SENTENCE_PAUSE && !interrupted) {
+      last.words.push(...t.words)
+      last.end = t.end
+      last.spoken += t.end - t.start
+    } else {
+      out.push({ ...t, words: [...t.words], spoken: t.end - t.start })
+    }
+  }
+  return out
+}
+
+// Speaking time leaves out the pauses joinUnfinished kept inside a turn.
+const seconds = (ts) => ts.reduce((s, t) => s + (t.spoken ?? t.end - t.start), 0)
 
 /** Counts each lexicon phrase in a token list, longest phrases first so "não sei se" isn't also "sei". */
 function countPhrases(tokens, phrases) {
@@ -84,7 +112,8 @@ export function userTurns({ mic = [], system = [], me = null }) {
   const speakers = new Set(mic.filter((w) => w.type === 'word').map((w) => w.speaker_id)).size
   if (!spans.length) {
     const { mine, rest } = myTurns(mic)
-    return { mine, others: [...rest, ...turns(system)], speakers, attributed: false }
+    const others = [...rest, ...turns(system)]
+    return { mine: joinUnfinished(mine, others), others, speakers, attributed: false }
   }
   const inside = (w, channel) => spans.some((s) => s.channel === channel && w.start >= s.start - 0.01 && w.end <= s.end + 0.01)
   const split = (words, channel) => {
@@ -93,7 +122,8 @@ export function userTurns({ mic = [], system = [], me = null }) {
   }
   const m = split(mic, 'mic'), s = split(system, 'system')
   const mineWords = [...m.mine, ...s.mine].sort((a, b) => a.start - b.start).map((w) => ({ ...w, speaker_id: 'me' }))
-  return { mine: turns(mineWords), others: [...turns(m.rest), ...turns(s.rest)], speakers, attributed: true }
+  const others = [...turns(m.rest), ...turns(s.rest)]
+  return { mine: joinUnfinished(turns(mineWords), others), others, speakers, attributed: true }
 }
 
 export function computeMetrics({ mic = [], system = [], meta = null, me = null, lexicon }) {
