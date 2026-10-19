@@ -27,12 +27,22 @@ test('multi-word hedges win over the words inside them', () => {
 })
 
 test('the dominant mic speaker is the user, and turns split at pauses', () => {
-  const mic = [...say('one two three four five', 'speaker_0', 0), ...say('six seven', 'speaker_0', 5), ...say('someone else', 'speaker_1', 10)]
+  const mic = [...say('one two three four five.', 'speaker_0', 0), ...say('six seven', 'speaker_0', 5), ...say('someone else', 'speaker_1', 10)]
   const m = computeMetrics({ mic, meta, lexicon })
   assert.equal(m.mic_speakers, 2)
   assert.equal(m.my_turns, 2)
   assert.equal(m.my_words, 7)
   assert.equal(m.avg_turn_words, 3.5)
+})
+
+test('a pause inside a sentence does not split the turn, unless someone spoke or the pause ran long', () => {
+  const first = say('vou avaliar qual que vai ser o--', 'speaker_0', 0) // ends at 2.7 s, unfinished
+  const turnsWith = (second, system = []) => computeMetrics({ mic: [...first, ...second], system, meta, lexicon }).my_turns
+  assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 3.9)), 1)
+  assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 3.9), say('Uhum.', 'speaker_0', 3.1)), 2)
+  assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 14)), 2)
+  const finished = say('vou avaliar isso.', 'speaker_0', 0)
+  assert.equal(computeMetrics({ mic: [...finished, ...say('Depois eu volto.', 'speaker_0', 2.5)], meta, lexicon }).my_turns, 2)
 })
 
 test('fillers only count in verbatim meetings, and only Mac verbatim meetings are baseline data', () => {
