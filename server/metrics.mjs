@@ -34,21 +34,25 @@ function turns(words) {
  * as long as nobody else spoke in the gap. Each half alone reads as a fragment and skews its classification.
  */
 function joinUnfinished(mine, others) {
-  const starts = others.flatMap((t) => t.words.map((w) => w.start))
+  const heard = others.flatMap((t) => t.words)
   const out = []
   for (const t of mine) {
     const last = out.at(-1)
-    if (last && !endsSentence(last.words.at(-1).text) && t.start - last.end < MID_SENTENCE_PAUSE && !starts.some((s) => s > last.end && s < t.start)) {
+    // Any word of theirs that overlaps the gap, not only one that starts inside it.
+    const interrupted = last && heard.some((w) => w.start < t.start && w.end > last.end)
+    if (last && !endsSentence(last.words.at(-1).text) && t.start - last.end < MID_SENTENCE_PAUSE && !interrupted) {
       last.words.push(...t.words)
       last.end = t.end
+      last.spoken += t.end - t.start
     } else {
-      out.push({ ...t, words: [...t.words] })
+      out.push({ ...t, words: [...t.words], spoken: t.end - t.start })
     }
   }
   return out
 }
 
-const seconds = (ts) => ts.reduce((s, t) => s + (t.end - t.start), 0)
+// Speaking time leaves out the pauses joinUnfinished kept inside a turn.
+const seconds = (ts) => ts.reduce((s, t) => s + (t.spoken ?? t.end - t.start), 0)
 
 /** Counts each lexicon phrase in a token list, longest phrases first so "não sei se" isn't also "sei". */
 function countPhrases(tokens, phrases) {

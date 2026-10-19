@@ -40,6 +40,12 @@ test('a pause inside a sentence does not split the turn, unless someone spoke or
   const turnsWith = (second, system = []) => computeMetrics({ mic: [...first, ...second], system, meta, lexicon }).my_turns
   assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 3.9)), 1)
   assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 3.9), say('Uhum.', 'speaker_0', 3.1)), 2)
+  // A word of theirs that starts before the gap and runs into it also counts as speaking in between.
+  const overlapping = [{ text: 'Uhum.', type: 'word', speaker_id: 'speaker_0', start: 2.5, end: 3.2 }]
+  assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 3.9), overlapping), 2)
+  // The joined pause is not speaking time: two 2.7 s halves count 5.4 s, not the 6.6 s from first word to last.
+  const joined = computeMetrics({ mic: [...first, ...say('qual o trampo que é fazer isso.', 'speaker_0', 3.9)], meta, lexicon })
+  assert.equal(joined.my_seconds, 5.4)
   assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 14)), 2)
   const finished = say('vou avaliar isso.', 'speaker_0', 0)
   assert.equal(computeMetrics({ mic: [...finished, ...say('Depois eu volto.', 'speaker_0', 2.5)], meta, lexicon }).my_turns, 2)
