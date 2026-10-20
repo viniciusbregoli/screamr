@@ -172,6 +172,25 @@ final class App: NSObject, NSApplicationDelegate {
         transcribe(MeetingInfo(dir: current.dir, title: current.title), includeSystem: hasSystem, openWhenDone: true)
     }
 
+    /// Picks an audio file from a voice recorder and transcribes it as a new meeting.
+    private func importRecording() {
+        // A transcription takes over the meeting menu item, which a running recording needs to stop.
+        guard meeting == nil, !store.transcribingMeeting else { return fail("Finish the current meeting first") }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio]
+        panel.message = "Choose a recording to transcribe as a meeting"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let source = panel.url else { return }
+        Task { @MainActor in
+            do {
+                let m = try await Meeting.importRecording(source)
+                transcribe(m, includeSystem: false, openWhenDone: false)
+            } catch {
+                fail("Import failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func transcribe(_ m: MeetingInfo, includeSystem: Bool, openWhenDone: Bool) {
         guard let key = Store.apiKey() else { return fail("No API key") }
         store.transcribingMeeting = true
@@ -201,6 +220,7 @@ final class App: NSObject, NSApplicationDelegate {
     @objc private func openDashboard() {
         dashboard.show(store: store, actions: DashboardActions(
             toggleMeeting: { [weak self] in self?.toggleMeeting() },
+            importRecording: { [weak self] in self?.importRecording() },
             retranscribe: { [weak self] m in
                 let system = m.dir.appendingPathComponent("system.m4a")
                 self?.transcribe(m, includeSystem: FileManager.default.fileExists(atPath: system.path), openWhenDone: false)
