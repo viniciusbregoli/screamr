@@ -177,7 +177,8 @@ final class Meeting {
         let labels = Transcript.labels(mic: mic, system: system, names: names).merging(names.filter { $0.key.hasPrefix("line:") }) { a, _ in a }
         try JSONEncoder().encode(labels).write(to: dir.appendingPathComponent("names.json"), options: .atomic)
         try writeMe(dir: dir, mic: mic, system: system, labels: labels, assigned: assigned, lines: lines, store: store)
-        let md = Transcript.markdown(title: MeetingTitle.read(dir) ?? title, mic: mic, system: system, names: names) {
+        let md = Transcript.markdown(title: MeetingTitle.read(dir) ?? title, mic: mic, system: system, names: names,
+                                     me: Transcript.mySpans(in: dir)) {
             TextRules.apply($0, replacements: rules)
         }
         let out = dir.appendingPathComponent("transcript.md")

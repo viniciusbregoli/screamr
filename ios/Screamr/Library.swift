@@ -45,7 +45,8 @@ struct MeetingFolder: Identifiable, Hashable {
         }
         let mic = words("mic"), system = words("system")
         let names = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: dir.appendingPathComponent("names.json"))))
-        return Transcript.merged(mic: mic, system: system, labels: names ?? Transcript.labels(mic: mic, system: system, micName: Transcript.systemName))
+        let lines = Transcript.merged(mic: mic, system: system, labels: names ?? Transcript.labels(mic: mic, system: system, micName: Transcript.systemName))
+        return Transcript.tidied(lines, me: Transcript.mySpans(in: dir))
     }
 }
 
