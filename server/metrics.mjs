@@ -3,7 +3,7 @@
 export const METRICS_VERSION = 'metrics-v3'
 
 // Same as Transcript.pauseBreak in the app: a longer pause starts a new turn, unless it falls inside a sentence
-// (see joinUnfinished). The app's transcript keeps splitting at every pause, since it only orders the lines.
+// (see joinUnfinished). The app's transcript joins those lines the same way (Transcript.joinUnfinished).
 const PAUSE_BREAK = 1.0
 // Past this, even an unfinished sentence ends the turn: the thought was dropped, not paused.
 const MID_SENTENCE_PAUSE = 10

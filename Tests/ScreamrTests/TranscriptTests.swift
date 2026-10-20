@@ -60,3 +60,24 @@ private func w(_ text: String, _ start: Double, _ speaker: String = "speaker_0")
     #expect(lines[1].lineKey == "mic:5.00")
     #expect(Transcript.markdown(title: "T", mic: mic, system: [], names: labels).contains("Ana:** there"))
 }
+
+@Test func aPauseInsideASentenceKeepsTheLineWhole() {
+    let mic = [w("fiquei,", 0), w("é,", 0.4), w("fazendo", 2), w("isso.", 2.4), w("E", 4), w("como--", 4.4), w("ele", 15)]
+    let lines = Transcript.merged(mic: mic, system: [], labels: [:])
+    // Joined after "é,"; split after the period; split past the 10 s cap even though "como--" is unfinished.
+    #expect(lines.map(\.text) == ["fiquei, é, fazendo isso.", "E como--", "ele"])
+    #expect(lines[0].lineKey == "mic:0.00")
+}
+
+@Test func someoneSpeakingInTheGapKeepsTheLinesApart() {
+    let mic = [w("vai", 0), w("ser", 0.4), w("o--", 3)]
+    let system = [Transcript.Word(text: "Hum.", start: 0.5, end: 2.8, type: "word", speaker_id: "speaker_0")]
+    let lines = Transcript.merged(mic: mic, system: system, labels: [:])
+    #expect(lines.map(\.text) == ["vai ser", "Hum.", "o--"])
+}
+
+@Test func twoScribeIdsWithTheSameNameStayOnSeparateLines() {
+    let mic = [w("vai", 0), w("ser", 2, "speaker_1")]
+    let lines = Transcript.merged(mic: mic, system: [], labels: ["mic:speaker_0": "Ana", "mic:speaker_1": "Ana"])
+    #expect(lines.map(\.speakerID) == ["speaker_0", "speaker_1"])
+}
