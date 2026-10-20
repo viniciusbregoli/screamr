@@ -75,3 +75,9 @@ private func w(_ text: String, _ start: Double, _ speaker: String = "speaker_0")
     let lines = Transcript.merged(mic: mic, system: system, labels: [:])
     #expect(lines.map(\.text) == ["vai ser", "Hum.", "o--"])
 }
+
+@Test func twoScribeIdsWithTheSameNameStayOnSeparateLines() {
+    let mic = [w("vai", 0), w("ser", 2, "speaker_1")]
+    let lines = Transcript.merged(mic: mic, system: [], labels: ["mic:speaker_0": "Ana", "mic:speaker_1": "Ana"])
+    #expect(lines.map(\.speakerID) == ["speaker_0", "speaker_1"])
+}
