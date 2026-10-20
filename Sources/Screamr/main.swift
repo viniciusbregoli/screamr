@@ -176,6 +176,7 @@ final class App: NSObject, NSApplicationDelegate {
     private func importRecording() {
         // A transcription takes over the meeting menu item, which a running recording needs to stop.
         guard meeting == nil, !store.transcribingMeeting else { return fail("Finish the current meeting first") }
+        guard Store.apiKey() != nil else { return fail("No API key") }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.audio]
         panel.message = "Choose a recording to transcribe as a meeting"
@@ -195,7 +196,10 @@ final class App: NSObject, NSApplicationDelegate {
     }
 
     private func transcribe(_ m: MeetingInfo, includeSystem: Bool, openWhenDone: Bool) {
-        guard let key = Store.apiKey() else { return fail("No API key") }
+        guard let key = Store.apiKey() else {
+            store.transcribingMeeting = false // an import may hold it while converting
+            return fail("No API key")
+        }
         store.transcribingMeeting = true
         transcribingDir = m.dir.lastPathComponent
         meetingItem.title = "Transcribing Meeting..."
