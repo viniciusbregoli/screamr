@@ -127,8 +127,12 @@ enum Transcript {
     /// Everyone else's lines without filler words; the user's stay verbatim, since those are the ones they study.
     /// Without me.json the user's lines are the "You" ones; with neither, nobody can be told apart and nothing changes.
     static func tidied(_ lines: [Segment], me: [Span]?) -> [Segment] {
+        // Empty spans mean the Mac matched no line to the user, so it says nothing about who they are.
+        let me = me?.isEmpty == false ? me : nil
+        // me.json is written from these same lines, so a span starts exactly where the user's line does;
+        // mere overlap would also claim another voice talking over the user on the same channel.
         let mine = { (s: Segment) in
-            me.map { $0.contains { $0.channel == s.channel && $0.start < s.end && $0.end > s.start } } ?? (s.speaker == "You")
+            me.map { $0.contains { $0.channel == s.channel && abs($0.start - s.start) < 0.005 } } ?? (s.speaker == "You")
         }
         guard me != nil || lines.contains(where: mine) else { return lines }
         return lines.compactMap { s in
