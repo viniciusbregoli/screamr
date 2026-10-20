@@ -181,11 +181,14 @@ final class App: NSObject, NSApplicationDelegate {
         panel.message = "Choose a recording to transcribe as a meeting"
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let source = panel.url else { return }
+        // Held through the conversion too, so no meeting or second import starts before transcription takes over.
+        store.transcribingMeeting = true
         Task { @MainActor in
             do {
                 let m = try await Meeting.importRecording(source)
                 transcribe(m, includeSystem: false, openWhenDone: false)
             } catch {
+                store.transcribingMeeting = false
                 fail("Import failed: \(error.localizedDescription)")
             }
         }
