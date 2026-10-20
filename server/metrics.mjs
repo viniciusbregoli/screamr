@@ -1,6 +1,6 @@
 // Deterministic speech metrics for one meeting, from Scribe's word timings. No model, no text in the output:
 // only counts, rates and durations, so results can leave the server while transcripts stay on it.
-export const METRICS_VERSION = 'metrics-v3'
+export const METRICS_VERSION = 'metrics-v4'
 
 // Same as Transcript.pauseBreak in the app: a longer pause starts a new turn, unless it falls inside a sentence
 // (see joinUnfinished). The app's transcript joins those lines the same way (Transcript.joinUnfinished).
@@ -8,6 +8,10 @@ const PAUSE_BREAK = 1.0
 // Past this, even an unfinished sentence ends the turn: the thought was dropped, not paused.
 const MID_SENTENCE_PAUSE = 10
 // Scribe closes a sentence with one of these; a turn that stops before one was cut by a pause for thought.
+// Scribe sometimes stretches one word over a long silence (a "tarde." timed from 4:09 to 5:14). No spoken word
+// lasts this long; uncapped, it counts as a minute of their talk and blocks every join in that minute.
+const MAX_WORD = 3
+const capped = (words) => words.map((w) => (w.end - w.start > MAX_WORD ? { ...w, end: w.start + MAX_WORD } : w))
 const endsSentence = (text) => /[.!?…]["'”»)\]]*$/u.test(text)
 
 const normalize = (text) => text.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
@@ -108,6 +112,8 @@ export function myTurns(mic) {
  * mic speaker.
  */
 export function userTurns({ mic = [], system = [], me = null }) {
+  mic = capped(mic)
+  system = capped(system)
   const spans = me?.spans ?? []
   const speakers = new Set(mic.filter((w) => w.type === 'word').map((w) => w.speaker_id)).size
   if (!spans.length) {
