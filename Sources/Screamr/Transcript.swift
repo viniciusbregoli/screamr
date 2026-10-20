@@ -143,8 +143,9 @@ enum Transcript {
         }
     }
 
-    /// The fillers in server/lexicon/v1.json, with repeated letters collapsed ("hmm" is "hm").
-    static let fillers: Set = ["uh", "uhm", "er", "erm", "hm", "hum", "ahn", "ãh", "uhu"]
+    /// The fillers in server/lexicon/v1.json, with repeated letters collapsed ("hmm" is "hm"), plus "hã",
+    /// the way Scribe spells "ãh" at the start of a sentence.
+    static let fillers: Set = ["uh", "uhm", "er", "erm", "hm", "hum", "ahn", "ãh", "hã", "uhu"]
     /// Words that are only fillers when set off by punctuation ("é," but not "isso é bom") or stretched ("ééé").
     /// "um" is here too: in Portuguese it is also the article ("um documento").
     static let aloneFillers: Set = ["um", "é", "eh", "ah", "e"]
