@@ -41,24 +41,25 @@ final class Meeting {
         guard !FileManager.default.fileExists(atPath: dir.path) else {
             throw Scribe.APIError(message: "A meeting from \(stamp) already exists; this recording may already be imported.")
         }
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        do {
-            guard let export = AVAssetExportSession(asset: AVURLAsset(url: source), presetName: AVAssetExportPresetAppleM4A) else {
-                throw Scribe.APIError(message: "Can't read \(source.lastPathComponent) as audio.")
-            }
-            export.outputURL = dir.appendingPathComponent("mic.m4a")
-            export.outputFileType = .m4a
-            await export.export()
-            guard export.status == .completed else {
-                throw export.error ?? Scribe.APIError(message: "Converting \(source.lastPathComponent) failed.")
-            }
-            try MeetingTitle.write(source.deletingPathExtension().lastPathComponent, to: dir)
-            // Marks the origin before transcription, which keeps it, so a re-transcription still knows.
-            try Scribe.Meta(verbatim: Scribe.meetingVerbatim, languages: [:], source: "import").write(to: dir)
-        } catch {
-            try? FileManager.default.removeItem(at: dir)
-            throw error
+        // Built aside and moved in whole, so a sync never uploads a half-converted file.
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let staging = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: root, create: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let work = staging.appendingPathComponent(stamp, isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        guard let export = AVAssetExportSession(asset: AVURLAsset(url: source), presetName: AVAssetExportPresetAppleM4A) else {
+            throw Scribe.APIError(message: "Can't read \(source.lastPathComponent) as audio.")
         }
+        export.outputURL = work.appendingPathComponent("mic.m4a")
+        export.outputFileType = .m4a
+        await export.export()
+        guard export.status == .completed else {
+            throw export.error ?? Scribe.APIError(message: "Converting \(source.lastPathComponent) failed.")
+        }
+        try MeetingTitle.write(source.deletingPathExtension().lastPathComponent, to: work)
+        // Marks the origin before transcription, which keeps it, so a re-transcription still knows.
+        try Scribe.Meta(verbatim: Scribe.meetingVerbatim, languages: [:], source: "import").write(to: work)
+        try FileManager.default.moveItem(at: work, to: dir)
         return MeetingInfo(dir: dir, title: "Meeting \(stamp)")
     }
 
