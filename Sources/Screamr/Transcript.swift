@@ -112,10 +112,70 @@ enum Transcript {
         text.range(of: #"[.!?…]["'”»)\]]*$"#, options: .regularExpression) != nil
     }
 
+    /// A stretch of the user's own speech, as listed in me.json.
+    struct Span: Codable, Equatable {
+        let channel: String
+        let start: Double
+        let end: Double
+    }
+
+    static func mySpans(in dir: URL) -> [Span]? {
+        struct Me: Decodable { let spans: [Span] }
+        return (try? JSONDecoder().decode(Me.self, from: Data(contentsOf: dir.appendingPathComponent("me.json"))))?.spans
+    }
+
+    /// Everyone else's lines without filler words; the user's stay verbatim, since those are the ones they study.
+    /// Without me.json the user's lines are the "You" ones; with neither, nobody can be told apart and nothing changes.
+    static func tidied(_ lines: [Segment], me: [Span]?) -> [Segment] {
+        // Empty spans mean the Mac matched no line to the user, so it says nothing about who they are.
+        let me = me?.isEmpty == false ? me : nil
+        // me.json is written from these same lines, so a span starts exactly where the user's line does;
+        // mere overlap would also claim another voice talking over the user on the same channel.
+        let mine = { (s: Segment) in
+            me.map { $0.contains { $0.channel == s.channel && abs($0.start - s.start) < 0.005 } } ?? (s.speaker == "You")
+        }
+        guard me != nil || lines.contains(where: mine) else { return lines }
+        return lines.compactMap { s in
+            guard !mine(s) else { return s }
+            var s = s
+            s.text = withoutFillers(s.text)
+            return s.text.isEmpty ? nil : s
+        }
+    }
+
+    /// The fillers in server/lexicon/v1.json, with repeated letters collapsed ("hmm" is "hm").
+    static let fillers: Set = ["uh", "uhm", "er", "erm", "hm", "hum", "ahn", "ãh", "uhu"]
+    /// Words that are only fillers when set off by punctuation ("é," but not "isso é bom") or stretched ("ééé").
+    /// "um" is here too: in Portuguese it is also the article ("um documento").
+    static let aloneFillers: Set = ["um", "é", "eh", "ah", "e"]
+
+    static func withoutFillers(_ text: String) -> String {
+        var kept: [String] = []
+        var capitalize = false
+        for token in text.split(separator: " ").map(String.init) {
+            let bare = token.lowercased().trimmingCharacters(in: .punctuationCharacters)
+            let word = String(bare.reduce(into: "") { if $0.last != $1 { $0.append($1) } })
+            let alone = token.last.map { $0.isPunctuation } ?? false
+            guard fillers.contains(word) || (aloneFillers.contains(word) && (alone || word != bare)) else {
+                kept.append(capitalize ? token.prefix(1).uppercased() + token.dropFirst() : token)
+                capitalize = false
+                continue
+            }
+            // Keep what the filler carried: the end of a sentence, or the capital that started one.
+            if let end = token.last(where: { ".!?…".contains($0) }), let last = kept.popLast() {
+                kept.append(last.trimmingCharacters(in: CharacterSet(charactersIn: ",;:")) + (".!?…".contains(last.last ?? " ") ? "" : String(end)))
+            }
+            if token.first?.isUppercase == true { capitalize = true }
+        }
+        return kept.joined(separator: " ")
+    }
+
     /// `names` overrides labels for recognized people, keyed "mic:speaker_0" / "system:speaker_1".
-    static func markdown(title: String, mic: [Word], system: [Word], names: [String: String] = [:], fix: (String) -> String = { $0 }) -> String {
+    /// `me` (from me.json) marks the user's lines, the only ones that keep their fillers.
+    static func markdown(title: String, mic: [Word], system: [Word], names: [String: String] = [:], me: [Span]? = nil,
+                         fix: (String) -> String = { $0 }) -> String {
         let lines = names.filter { $0.key.hasPrefix("line:") }
-        let all = merged(mic: mic, system: system, labels: labels(mic: mic, system: system, names: names).merging(lines) { a, _ in a })
+        let all = tidied(merged(mic: mic, system: system, labels: labels(mic: mic, system: system, names: names).merging(lines) { a, _ in a }), me: me)
         var md = "# \(title)\n\n"
         if all.isEmpty { md += "_No speech detected._\n" }
         for s in all {

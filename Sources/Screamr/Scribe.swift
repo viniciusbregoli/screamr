@@ -17,7 +17,8 @@ enum Scribe {
 
     /// Verbatim keeps fillers ("um", "é", "hum") and false starts; clean (`no_verbatim`) drops them.
     /// Dictation defaults to clean, since the text gets pasted; meetings default to verbatim, since
-    /// they are the data for speech analysis and fillers are part of what gets measured.
+    /// they are the data for speech analysis and fillers are part of what gets measured. Only the user's
+    /// fillers are measured, so a Mac meeting's call audio is always transcribed clean.
     static let dictationVerbatimKey = "dictationVerbatim"
     static let meetingVerbatimKey = "meetingVerbatim"
     static var dictationVerbatim: Bool { UserDefaults.standard.object(forKey: dictationVerbatimKey) as? Bool ?? false }
@@ -32,7 +33,10 @@ enum Scribe {
     /// How a meeting was transcribed, saved as meta.json next to its words so analysis can filter on it
     /// and never mixes verbatim and clean transcripts.
     struct Meta: Codable, Equatable {
+        /// The mic channel's mode, the one carrying the user's voice.
         var transcription_mode: String
+        /// The call audio's mode when it differs from the mic's (Mac meetings since the call went clean).
+        var system_mode: String?
         var model_id: String
         /// "mac" or "iphone": on the Mac the mic channel is the user, on the iPhone everyone shares it.
         var source: String

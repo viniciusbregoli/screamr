@@ -663,7 +663,8 @@ private struct MeetingsPane: View {
         _ = edits
         let mic = Meeting.loadWords(m.dir, "mic"), system = Meeting.loadWords(m.dir, "system")
         let names = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: m.dir.appendingPathComponent("names.json"))))
-        return Transcript.merged(mic: mic, system: system, labels: names ?? Transcript.labels(mic: mic, system: system))
+        return Transcript.tidied(Transcript.merged(mic: mic, system: system, labels: names ?? Transcript.labels(mic: mic, system: system)),
+                                 me: Transcript.mySpans(in: m.dir))
     }
 
     private func clock(_ seconds: Double) -> String {

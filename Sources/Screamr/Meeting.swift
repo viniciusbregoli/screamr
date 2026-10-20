@@ -39,14 +39,16 @@ final class Meeting {
         let verbatim = Scribe.meetingVerbatim
         async let mic = Scribe.words(file: dir.appendingPathComponent("mic.m4a"), apiKey: apiKey, keyterms: terms, verbatim: verbatim)
         async let system = includeSystem
-            ? Scribe.words(file: dir.appendingPathComponent("system.m4a"), apiKey: apiKey, keyterms: terms, verbatim: verbatim)
+            ? Scribe.words(file: dir.appendingPathComponent("system.m4a"), apiKey: apiKey, keyterms: terms, verbatim: false)
             : Scribe.Channel(words: [], language: nil)
         let (micChannel, systemChannel) = try await (mic, system)
         // Raw words are kept so transcripts can be re-rendered with new names without paying Scribe again.
         try saveWords(micChannel.words, dir, "mic")
         try saveWords(systemChannel.words, dir, "system")
         let languages = ["mic": micChannel.language, "system": systemChannel.language].compactMapValues { $0 }
-        try Scribe.Meta(verbatim: verbatim, languages: languages).write(to: dir)
+        var meta = Scribe.Meta(verbatim: verbatim, languages: languages)
+        if verbatim && includeSystem { meta.system_mode = "clean" }
+        try meta.write(to: dir)
         await identifySpeakers(dir: dir, store: store)
         return try render(dir: dir, title: title, store: store)
     }
@@ -175,7 +177,8 @@ final class Meeting {
         let labels = Transcript.labels(mic: mic, system: system, names: names).merging(names.filter { $0.key.hasPrefix("line:") }) { a, _ in a }
         try JSONEncoder().encode(labels).write(to: dir.appendingPathComponent("names.json"), options: .atomic)
         try writeMe(dir: dir, mic: mic, system: system, labels: labels, assigned: assigned, lines: lines, store: store)
-        let md = Transcript.markdown(title: MeetingTitle.read(dir) ?? title, mic: mic, system: system, names: names) {
+        let md = Transcript.markdown(title: MeetingTitle.read(dir) ?? title, mic: mic, system: system, names: names,
+                                     me: Transcript.mySpans(in: dir)) {
             TextRules.apply($0, replacements: rules)
         }
         let out = dir.appendingPathComponent("transcript.md")
