@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// One meeting: mic and system audio recorded to separate files, transcribed per channel on stop.
@@ -11,17 +12,52 @@ final class Meeting {
     private let system = SystemAudioTap()
     private(set) var systemError: String?
 
-    init() throws {
+    /// The folder name. Seconds, so two meetings started in the same minute get separate folders.
+    static func stamp(_ date: Date) -> String {
         let f = DateFormatter()
-        // Seconds, so two meetings started in the same minute get separate folders.
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let stamp = f.string(from: Date())
+        return f.string(from: date)
+    }
+
+    init() throws {
+        let stamp = Self.stamp(Date())
         title = "Meeting \(stamp)"
         dir = Self.root.appendingPathComponent(stamp, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try mic.start(writingTo: dir.appendingPathComponent("mic.m4a"))
         // An in-person meeting still works without call audio, so this is not fatal.
         do { try system.start(writingTo: dir.appendingPathComponent("system.m4a")) } catch { systemError = error.localizedDescription }
+    }
+
+    /// A recording made elsewhere (a voice recorder) as a new meeting, dated when it was recorded and named
+    /// after the file. Its one channel becomes the mic, so it's handled like an in-person meeting recorded here.
+    static func importRecording(_ source: URL, into root: URL = root) async throws -> MeetingInfo {
+        let values = try? source.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        // Copying a file can reset its creation date, so the earlier of the two is closer to the recording.
+        let date = [values?.creationDate, values?.contentModificationDate].compactMap { $0 }.min() ?? Date()
+        let stamp = stamp(date)
+        let dir = root.appendingPathComponent(stamp, isDirectory: true)
+        guard !FileManager.default.fileExists(atPath: dir.path) else {
+            throw Scribe.APIError(message: "A meeting from \(stamp) already exists; this recording may already be imported.")
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            guard let export = AVAssetExportSession(asset: AVURLAsset(url: source), presetName: AVAssetExportPresetAppleM4A) else {
+                throw Scribe.APIError(message: "Can't read \(source.lastPathComponent) as audio.")
+            }
+            export.outputURL = dir.appendingPathComponent("mic.m4a")
+            export.outputFileType = .m4a
+            await export.export()
+            guard export.status == .completed else {
+                throw export.error ?? Scribe.APIError(message: "Converting \(source.lastPathComponent) failed.")
+            }
+            try MeetingTitle.write(source.deletingPathExtension().lastPathComponent, to: dir)
+        } catch {
+            try? FileManager.default.removeItem(at: dir)
+            throw error
+        }
+        return MeetingInfo(dir: dir, title: "Meeting \(stamp)")
     }
 
     /// Stops recording and returns whether the system channel has anything worth transcribing.
