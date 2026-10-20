@@ -33,4 +33,5 @@ import Testing
     #expect(json.contains("\"transcribed_at\" : \"1970-01-01T00:00:00Z\""))
     #expect(json.contains("\"mic\" : \"por\""))
     #expect(json.contains("\"source\" : \"mac\""))
+    #expect(!json.contains("system_mode")) // only written when the call audio went clean
 }
