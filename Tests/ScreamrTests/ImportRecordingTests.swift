@@ -22,6 +22,8 @@ import Testing
     let m = try await Meeting.importRecording(source, into: root)
     #expect(m.dir.lastPathComponent == Meeting.stamp(recorded))
     #expect(MeetingTitle.read(m.dir) == "Daily standup")
+    // Marked as imported, so neither the Mac nor the server takes its one channel to be the user.
+    #expect(Scribe.Meta.source(in: m.dir) == "import")
     let audio = try AVAudioFile(forReading: m.dir.appendingPathComponent("mic.m4a"))
     #expect(abs(Double(audio.length) / audio.fileFormat.sampleRate - 1) < 0.1)
 
