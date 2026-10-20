@@ -90,7 +90,8 @@ enum Transcript {
     /// Joins a line a pause cut mid-sentence ("vai ser o-- [1.2 s] qual o trampo") back onto the speaker's
     /// previous line, as long as nobody else spoke in the gap. Same rule as joinUnfinished in server/metrics.mjs.
     static func joinUnfinished(_ lines: [Segment]) -> [Segment] {
-        let sameVoice = { (a: Segment, b: Segment) in a.channel == b.channel && a.speaker == b.speaker }
+        // The id too: the speaker menu reassigns "channel:speakerID", which must cover the whole line.
+        let sameVoice = { (a: Segment, b: Segment) in a.channel == b.channel && a.speakerID == b.speakerID && a.speaker == b.speaker }
         var out: [Segment] = []
         for s in lines {
             if var last = out.last, sameVoice(last, s), !endsSentence(last.text), s.start - last.end < midSentencePause,
