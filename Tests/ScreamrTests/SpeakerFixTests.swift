@@ -18,7 +18,7 @@ private func unit(_ v: [Float]) -> [Float] { VoicePrinter.mean([v]) }
     store.people = [me, ana]
     let w = { (text: String, id: String, start: Double) in Transcript.Word(text: text, start: start, end: start + 0.5, type: "word", speaker_id: id) }
     // Scribe heard the user as speaker_0 and wrongly matched that voice to Ana.
-    let words = [w("Proponho", "speaker_0", 0), w("isso", "speaker_0", 5), w("Concordo", "speaker_1", 10)]
+    let words = [w("Proponho.", "speaker_0", 0), w("isso", "speaker_0", 5), w("Concordo", "speaker_1", 10)]
     try JSONEncoder().encode(words).write(to: dir.appendingPathComponent("mic.words.json"))
     try JSONEncoder().encode(["mic:speaker_0": ana.id, "mic:speaker_1": ana.id]).write(to: dir.appendingPathComponent("speakers.json"))
 
