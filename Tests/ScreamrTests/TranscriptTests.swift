@@ -99,6 +99,9 @@ private func w(_ text: String, _ start: Double, _ speaker: String = "speaker_0")
     // me.json says who the user is, whatever the label: here the mic voice is someone in the room.
     let me = [Transcript.Span(channel: "system", start: 2, end: 3.1)]
     #expect(Transcript.tidied(lines, me: me).map(\.text) == ["Sim.", "Ééé, ok."])
+    // An empty me.json falls back to the "You" label; a span only claims the line starting where it does.
+    #expect(Transcript.tidied(lines, me: []).map(\.text) == ["Hum, sim.", "Ok."])
+    #expect(Transcript.tidied(lines, me: [Transcript.Span(channel: "system", start: 1.5, end: 3.1)]).map(\.text) == ["Sim.", "Ok."])
     // With no "You" line and no me.json nobody can be told apart, so every line stays verbatim.
     let room = Transcript.merged(mic: [], system: system, labels: [:])
     #expect(Transcript.tidied(room, me: nil).map(\.text) == ["Ééé, ok."])
