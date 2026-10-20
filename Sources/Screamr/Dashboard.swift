@@ -176,6 +176,7 @@ struct Dashboard: View {
         ZStack {
             ForEach(Pane.allCases) { p in Button("") { pane = p }.keyboardShortcut(p.key, modifiers: .command) }
             Button("") { palette = true }.keyboardShortcut("k", modifiers: .command)
+            Button("") { pane = .meetings; actions.importRecording() }.keyboardShortcut("i", modifiers: .command)
             // "=" is the unshifted "+" key, so Cmd+= and Cmd++ both zoom in, as in browsers.
             Button("") { zoom(by: 0.1) }.keyboardShortcut("=", modifiers: .command)
             Button("") { zoom(by: 0.1) }.keyboardShortcut("+", modifiers: .command)
@@ -189,7 +190,7 @@ struct Dashboard: View {
     private var commands: [PaletteCommand] {
         Pane.allCases.map { p in PaletteCommand(title: "Go to \(p.rawValue)", hint: "⌘\(String(p.key.character))") { pane = p } } + [
             PaletteCommand(title: store.meetingActive ? "Stop meeting recording" : "Start meeting recording", hint: "⌃⌥⌘M", run: actions.toggleMeeting),
-            PaletteCommand(title: "Import a recording", hint: "⌘I", run: actions.importRecording),
+            PaletteCommand(title: "Import a recording", hint: "⌘I") { pane = .meetings; actions.importRecording() },
             PaletteCommand(title: "Search dictation history", hint: "/") { pane = .home; searchRequest += 1 },
             PaletteCommand(title: "Rename meeting", hint: "⌘R") { pane = .meetings; renameRequested = true },
             PaletteCommand(title: "Open meetings folder", hint: "") {
@@ -466,7 +467,6 @@ private struct MeetingsPane: View {
                 PaneHeader(title: "Meetings", blurb: "Mic and call audio, transcribed by Scribe with speakers recognized by voice.")
                 Spacer()
                 Button(action: actions.importRecording) { HStack(spacing: 4) { Text("Import recording"); KeyChip("⌘I") } }
-                    .keyboardShortcut("i", modifiers: .command)
                     .disabled(store.transcribingMeeting || store.meetingActive)
                     .help("Transcribe audio from a voice recorder as a meeting")
             }
