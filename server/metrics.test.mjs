@@ -47,6 +47,11 @@ test('a pause inside a sentence does not split the turn, unless someone spoke or
   const joined = computeMetrics({ mic: [...first, ...say('qual o trampo que é fazer isso.', 'speaker_0', 3.9)], meta, lexicon })
   assert.equal(joined.my_seconds, 5.4)
   assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 14)), 2)
+  // A word of theirs that Scribe stretched over a minute of silence is not someone speaking in the gap.
+  // Like the real one: it starts half a minute before the pause and "ends" well after it.
+  const stretched = [{ text: 'tarde.', type: 'word', speaker_id: 'speaker_1', start: -30, end: 35 }]
+  assert.equal(turnsWith(say('qual o trampo que é fazer isso.', 'speaker_0', 3.9), stretched), 1)
+  assert.equal(computeMetrics({ mic: first, system: stretched, meta, lexicon }).others_seconds, 3)
   const finished = say('vou avaliar isso.', 'speaker_0', 0)
   assert.equal(computeMetrics({ mic: [...finished, ...say('Depois eu volto.', 'speaker_0', 2.5)], meta, lexicon }).my_turns, 2)
 })
