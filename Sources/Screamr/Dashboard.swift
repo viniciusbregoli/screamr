@@ -22,6 +22,7 @@ enum Pane: String, CaseIterable, Identifiable {
 
 struct DashboardActions {
     let toggleMeeting: () -> Void
+    var importRecording: () -> Void = {}
     let retranscribe: (MeetingInfo) -> Void
     var syncNow: () -> Void = {}
     var meetingDeleted: (MeetingInfo) -> Void = { _ in }
@@ -32,6 +33,7 @@ let shortcutList: [(keys: String, action: String)] = [
     ("Double-tap Fn / Fn+Space", "Hands-free dictation"),
     ("Esc", "Cancel dictation"),
     ("⌃⌥⌘M", "Start or stop a meeting recording"),
+    ("⌘I", "Import a recording as a meeting"),
     ("⌃⌥⌘D", "Open this dashboard"),
     ("⌘1 to ⌘6", "Switch section"),
     ("⌘K", "Command palette"),
@@ -174,6 +176,7 @@ struct Dashboard: View {
         ZStack {
             ForEach(Pane.allCases) { p in Button("") { pane = p }.keyboardShortcut(p.key, modifiers: .command) }
             Button("") { palette = true }.keyboardShortcut("k", modifiers: .command)
+            Button("") { pane = .meetings; actions.importRecording() }.keyboardShortcut("i", modifiers: .command)
             // "=" is the unshifted "+" key, so Cmd+= and Cmd++ both zoom in, as in browsers.
             Button("") { zoom(by: 0.1) }.keyboardShortcut("=", modifiers: .command)
             Button("") { zoom(by: 0.1) }.keyboardShortcut("+", modifiers: .command)
@@ -187,6 +190,7 @@ struct Dashboard: View {
     private var commands: [PaletteCommand] {
         Pane.allCases.map { p in PaletteCommand(title: "Go to \(p.rawValue)", hint: "⌘\(String(p.key.character))") { pane = p } } + [
             PaletteCommand(title: store.meetingActive ? "Stop meeting recording" : "Start meeting recording", hint: "⌃⌥⌘M", run: actions.toggleMeeting),
+            PaletteCommand(title: "Import a recording", hint: "⌘I") { pane = .meetings; actions.importRecording() },
             PaletteCommand(title: "Search dictation history", hint: "/") { pane = .home; searchRequest += 1 },
             PaletteCommand(title: "Rename meeting", hint: "⌘R") { pane = .meetings; renameRequested = true },
             PaletteCommand(title: "Open meetings folder", hint: "") {
@@ -459,7 +463,13 @@ private struct MeetingsPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PaneHeader(title: "Meetings", blurb: "Mic and call audio, transcribed by Scribe with speakers recognized by voice.")
+            HStack(alignment: .top) {
+                PaneHeader(title: "Meetings", blurb: "Mic and call audio, transcribed by Scribe with speakers recognized by voice.")
+                Spacer()
+                Button(action: actions.importRecording) { HStack(spacing: 4) { Text("Import recording"); KeyChip("⌘I") } }
+                    .disabled(store.transcribingMeeting || store.meetingActive)
+                    .help("Transcribe audio from a voice recorder as a meeting")
+            }
             if store.meetings.isEmpty {
                 empty
             } else {
@@ -533,6 +543,7 @@ private struct MeetingsPane: View {
                 .foregroundStyle(Theme.subtext0).multilineTextAlignment(.center).frame(maxWidth: 380)
             Button(action: actions.toggleMeeting) { HStack { Text("Record meeting"); KeyChip("⌃⌥⌘M") } }
                 .padding(.top, 4)
+            Text("Recorded on a voice recorder? Import it with ⌘I.").zfont(11).foregroundStyle(Theme.overlay2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

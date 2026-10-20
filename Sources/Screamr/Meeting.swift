@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// One meeting: mic and system audio recorded to separate files, transcribed per channel on stop.
@@ -11,17 +12,55 @@ final class Meeting {
     private let system = SystemAudioTap()
     private(set) var systemError: String?
 
-    init() throws {
+    /// The folder name. Seconds, so two meetings started in the same minute get separate folders.
+    static func stamp(_ date: Date) -> String {
         let f = DateFormatter()
-        // Seconds, so two meetings started in the same minute get separate folders.
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let stamp = f.string(from: Date())
+        return f.string(from: date)
+    }
+
+    init() throws {
+        let stamp = Self.stamp(Date())
         title = "Meeting \(stamp)"
         dir = Self.root.appendingPathComponent(stamp, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try mic.start(writingTo: dir.appendingPathComponent("mic.m4a"))
         // An in-person meeting still works without call audio, so this is not fatal.
         do { try system.start(writingTo: dir.appendingPathComponent("system.m4a")) } catch { systemError = error.localizedDescription }
+    }
+
+    /// A recording made elsewhere (a voice recorder) as a new meeting, dated when it was recorded and named
+    /// after the file. Its one channel becomes the mic, so it's handled like an in-person meeting recorded here.
+    static func importRecording(_ source: URL, into root: URL = root) async throws -> MeetingInfo {
+        let values = try? source.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        // Copying a file can reset its creation date, so the earlier of the two is closer to the recording.
+        let date = [values?.creationDate, values?.contentModificationDate].compactMap { $0 }.min() ?? Date()
+        let stamp = stamp(date)
+        let dir = root.appendingPathComponent(stamp, isDirectory: true)
+        guard !FileManager.default.fileExists(atPath: dir.path) else {
+            throw Scribe.APIError(message: "A meeting from \(stamp) already exists; this recording may already be imported.")
+        }
+        // Built aside and moved in whole, so a sync never uploads a half-converted file.
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let staging = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: root, create: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let work = staging.appendingPathComponent(stamp, isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        guard let export = AVAssetExportSession(asset: AVURLAsset(url: source), presetName: AVAssetExportPresetAppleM4A) else {
+            throw Scribe.APIError(message: "Can't read \(source.lastPathComponent) as audio.")
+        }
+        export.outputURL = work.appendingPathComponent("mic.m4a")
+        export.outputFileType = .m4a
+        await export.export()
+        guard export.status == .completed else {
+            throw export.error ?? Scribe.APIError(message: "Converting \(source.lastPathComponent) failed.")
+        }
+        try MeetingTitle.write(source.deletingPathExtension().lastPathComponent, to: work)
+        // Marks the origin before transcription, which keeps it, so a re-transcription still knows.
+        try Scribe.Meta(verbatim: Scribe.meetingVerbatim, languages: [:], source: "import").write(to: work)
+        try FileManager.default.moveItem(at: work, to: dir)
+        return MeetingInfo(dir: dir, title: "Meeting \(stamp)")
     }
 
     /// Stops recording and returns whether the system channel has anything worth transcribing.
@@ -46,7 +85,7 @@ final class Meeting {
         try saveWords(micChannel.words, dir, "mic")
         try saveWords(systemChannel.words, dir, "system")
         let languages = ["mic": micChannel.language, "system": systemChannel.language].compactMapValues { $0 }
-        var meta = Scribe.Meta(verbatim: verbatim, languages: languages)
+        var meta = Scribe.Meta(verbatim: verbatim, languages: languages, source: Scribe.Meta.source(in: dir) == "import" ? "import" : nil)
         if verbatim && includeSystem { meta.system_mode = "clean" }
         try meta.write(to: dir)
         await identifySpeakers(dir: dir, store: store)
@@ -129,6 +168,8 @@ final class Meeting {
     @MainActor
     static func identifySpeakers(dir: URL, store: Store) async {
         var assigned: [String: UUID] = [:]
+        // A recorder's one channel holds everyone, so a lone voice on it says nothing about who the user is.
+        let imported = Scribe.Meta.source(in: dir) == "import"
         for channel in ["mic", "system"] {
             let words = loadWords(dir, channel)
             let ranges = PeopleMatcher.speakerRanges(words)
@@ -151,7 +192,7 @@ final class Meeting {
                     assigned["\(channel):\(speaker)"] = store.people[i].id
                 } else {
                     // A lone voice on the mic is almost always the user, so start them off named.
-                    let isUser = channel == "mic" && ranges.count == 1 && !store.people.contains { $0.name == "You" }
+                    let isUser = !imported && channel == "mic" && ranges.count == 1 && !store.people.contains { $0.name == "You" }
                     let person = Person(number: (store.people.map(\.number).max() ?? 0) + 1, name: isUser ? "You" : "",
                                         voice: voice, meetings: [meeting], quote: quote,
                                         isMe: isUser && store.me == nil ? true : nil, prints: [meeting: voice])

@@ -39,24 +39,31 @@ enum Scribe {
         var system_mode: String?
         var model_id: String
         /// "mac" or "iphone": on the Mac the mic channel is the user, on the iPhone everyone shares it.
+        /// "import" is a voice recorder's file imported on the Mac: everyone shares its one channel too.
         var source: String
         var transcribed_at: Date
         /// Channel ("mic", "system") to Scribe's language code, e.g. "por".
         var languages: [String: String]
 
-        init(verbatim: Bool, languages: [String: String], at date: Date = Date()) {
+        init(verbatim: Bool, languages: [String: String], source: String? = nil, at date: Date = Date()) {
             transcription_mode = verbatim ? "verbatim" : "clean"
             model_id = Scribe.model
             #if os(iOS)
-            source = "iphone"
+            self.source = source ?? "iphone"
             #else
-            source = "mac"
+            self.source = source ?? "mac"
             #endif
             transcribed_at = date
             self.languages = languages
         }
 
-        func write(to dir: URL) throws {
+        /// Where a meeting's audio came from, as last recorded in its meta.json.
+        static func source(in dir: URL) -> String? {
+            struct Source: Decodable { let source: String }
+            return (try? JSONDecoder().decode(Source.self, from: Data(contentsOf: dir.appendingPathComponent("meta.json"))))?.source
+        }
+
+                func write(to dir: URL) throws {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
