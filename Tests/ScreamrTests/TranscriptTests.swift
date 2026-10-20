@@ -88,6 +88,7 @@ private func w(_ text: String, _ start: Double, _ speaker: String = "speaker_0")
     // The sentence end a filler carried moves to the word before it.
     #expect(Transcript.withoutFillers("isso é um documento, hum.") == "isso é um documento.")
     #expect(Transcript.withoutFillers("Hmm.") == "")
+    #expect(Transcript.withoutFillers("Hã, tô finalizando.") == "Tô finalizando.")
 }
 
 @Test func onlyTheUsersLinesKeepTheirFillers() {
