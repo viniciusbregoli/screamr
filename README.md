@@ -4,6 +4,18 @@
 
 Voice dictation and meeting recording for macOS, transcribed by ElevenLabs Scribe. Modeled on Wispr Flow.
 
+## Screenshots
+
+Shown with demo data.
+
+![Home: dictation stats and history](assets/screenshot-home.png)
+
+| Meetings | People |
+|---|---|
+| ![Meeting transcript with speakers recognized by voice](assets/screenshot-meetings.png) | ![People recognized across meetings](assets/screenshot-people.png) |
+| **Dictionary** | **Flow bar** |
+| ![Dictionary words and replacements](assets/screenshot-dictionary.png) | ![Flow bar while dictating, and after a word is added to the dictionary](assets/screenshot-flowbar.png) |
+
 ## Run
 
 ```sh
