@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 
 final class App: NSObject, NSApplicationDelegate {
-    private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let fn = FnKey()
     private let recorder = Recorder()
     private let flowBar = FlowBar()
@@ -28,7 +28,7 @@ final class App: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Screamr", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         status.menu = menu
-        setIcon("mic")
+        setIcon("trayIdleTemplate")
         NSApp.mainMenu = mainMenu()
         flowBar.level = { [recorder] in recorder.level }
         syncNow()
@@ -108,7 +108,7 @@ final class App: NSObject, NSApplicationDelegate {
             targetApp = NSWorkspace.shared.frontmostApplication?.localizedName
             NSSound(named: "Tink")?.play()
             flowBar.show(.listening)
-            setIcon("mic.fill")
+            setIcon("trayListeningTemplate")
             stateItem.title = "Listening..."
         } catch {
             fail("Mic error: \(error.localizedDescription)")
@@ -310,7 +310,7 @@ final class App: NSObject, NSApplicationDelegate {
 
     private func idle() {
         flowBar.hide()
-        setIcon("mic")
+        setIcon("trayIdleTemplate")
         stateItem.title = "Hold Fn to dictate"
     }
 
@@ -321,8 +321,11 @@ final class App: NSObject, NSApplicationDelegate {
         stateItem.title = message
     }
 
-    private func setIcon(_ symbol: String) {
-        status.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Screamr")
+    /// Takes a tray asset bundled by build.sh (the "Template" suffix makes it tint with the menu bar) or an SF Symbol.
+    private func setIcon(_ name: String) {
+        let image = NSImage(named: name) ?? NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        image?.accessibilityDescription = "Screamr"
+        status.button?.image = image
     }
 }
 
