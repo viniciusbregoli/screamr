@@ -52,8 +52,10 @@ final class Meeting {
 
     /// Finalizes screen.mp4. Separate from `stop()` because closing the file takes a moment.
     func stopVideo() async {
+        guard #available(macOS 15, *), let recorder = screen as? ScreenRecorder else { return }
+        recorder.cancel()
         await videoStart?.value
-        if #available(macOS 15, *) { await (screen as? ScreenRecorder)?.stop() }
+        await recorder.stop()
     }
 
     /// A recording made elsewhere (a voice recorder) as a new meeting, dated when it was recorded and named

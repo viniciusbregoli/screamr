@@ -77,7 +77,11 @@ final class ScreenRecorder: NSObject, SCRecordingOutputDelegate, @unchecked Send
     private var stream: SCStream?
     private var finished: CheckedContinuation<Void, Never>?
     private var didFinish = false
+    private var cancelled = false
     private let lock = NSLock()
+
+    /// Called on stop, before waiting for a start that may still be loading, so capture never begins after the meeting ended.
+    func cancel() { lock.withLock { cancelled = true } }
 
     func start(_ video: MeetingVideo, writingTo url: URL) async throws {
         let content: SCShareableContent
@@ -127,6 +131,7 @@ final class ScreenRecorder: NSObject, SCRecordingOutputDelegate, @unchecked Send
         recording.outputFileType = .mp4
         recording.videoCodecType = .hevc
 
+        guard !lock.withLock({ cancelled }) else { return }
         let stream = SCStream(filter: filter, configuration: config, delegate: nil)
         try stream.addRecordingOutput(SCRecordingOutput(configuration: recording, delegate: self))
         self.stream = stream
