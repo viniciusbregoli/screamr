@@ -22,6 +22,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }()
     private var meeting: Meeting?
+    /// The latest screen.mp4 finalization, which Quit waits for so the file isn't left unreadable.
+    private var videoStop: Task<Void, Never>?
     private lazy var syncEngine = SyncEngine(root: Meeting.root, stateFile: Store.root.appendingPathComponent("sync-state.json"))
     private var syncing = false
     private var transcribingDir: String?
@@ -53,6 +55,15 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !trusted || !fn.start() {
             fail("Grant Accessibility in System Settings, then relaunch")
         }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let pending = videoStop else { return .terminateNow }
+        Task { @MainActor in
+            await pending.value
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     // Clicking the Dock icon while the dashboard is closed reopens it.
@@ -211,7 +222,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         meeting = nil
         store.meetingActive = false
         let hasSystem = current.stop()
-        if current.video != .none { Task { await current.stopVideo() } }
+        if current.video != .none {
+            let previous = videoStop
+            videoStop = Task {
+                await previous?.value
+                await current.stopVideo()
+            }
+        }
         NSSound(named: "Bottle")?.play()
         transcribe(MeetingInfo(dir: current.dir, title: current.title), includeSystem: hasSystem, openWhenDone: true)
     }
