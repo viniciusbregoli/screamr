@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 
-final class App: NSObject, NSApplicationDelegate {
+final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let fn = FnKey()
     private let recorder = Recorder()
@@ -14,7 +14,16 @@ final class App: NSObject, NSApplicationDelegate {
     private var targetApp: String?
     private var stateItem = NSMenuItem(title: "Hold Fn to dictate", action: nil, keyEquivalent: "")
     private lazy var meetingItem = item("Start Meeting Recording", #selector(toggleMeeting), "m", [.control, .option, .command])
+    private lazy var videoItem: NSMenuItem = {
+        let item = NSMenuItem(title: "Meeting Video", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "Meeting Video")
+        submenu.delegate = self
+        item.submenu = submenu
+        return item
+    }()
     private var meeting: Meeting?
+    /// The latest screen.mp4 finalization, which Quit waits for so the file isn't left unreadable.
+    private var videoStop: Task<Void, Never>?
     private lazy var syncEngine = SyncEngine(root: Meeting.root, stateFile: Store.root.appendingPathComponent("sync-state.json"))
     private var syncing = false
     private var transcribingDir: String?
@@ -25,6 +34,7 @@ final class App: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Open Dashboard", #selector(openDashboard), "d", [.control, .option, .command]))
         menu.addItem(meetingItem)
+        menu.addItem(videoItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Screamr", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         status.menu = menu
@@ -44,6 +54,38 @@ final class App: NSObject, NSApplicationDelegate {
         fn.onEvent = { [weak self] event in self?.handle(event) ?? false }
         if !trusted || !fn.start() {
             fail("Grant Accessibility in System Settings, then relaunch")
+        }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Quitting mid-meeting closes its files, so the audio can still be transcribed from the dashboard.
+        if let current = meeting {
+            _ = current.stop()
+            meeting = nil
+            queueVideoStop(current)
+        }
+        guard let pending = videoStop else { return .terminateNow }
+        var replied = false
+        let reply = { if !replied { replied = true; sender.reply(toApplicationShouldTerminate: true) } }
+        Task { @MainActor in
+            await pending.value
+            reply()
+        }
+        // Quit must not hang on a capture that never finishes stopping.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { reply() }
+        return .terminateLater
+    }
+
+    /// Stops this meeting's capture right away; only waiting is chained, so Quit covers every pending stop.
+    private func queueVideoStop(_ m: Meeting) {
+        guard m.video != .none else { return }
+        let stop = Task { await m.stopVideo() }
+        let previous = videoStop
+        videoStop = Task {
+            await previous?.value
+            await stop.value
+            // The dashboard shows the play button only once screen.mp4 is written.
+            await MainActor.run { store.refreshMeetings() }
         }
     }
 
@@ -151,23 +193,65 @@ final class App: NSObject, NSApplicationDelegate {
         flowBar.flash("Added to dictionary", "\(wrong) \u{2192} \(right)")
     }
 
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === videoItem.submenu else { return }
+        menu.removeAllItems()
+        let current = store.meetingVideo
+        func add(_ title: String, _ video: MeetingVideo, icon: NSImage? = nil) {
+            // No action while recording, which greys the item out: the source can't change mid-meeting.
+            let item = NSMenuItem(title: title, action: meeting == nil ? #selector(pickVideo(_:)) : nil, keyEquivalent: "")
+            item.target = self
+            item.representedObject = video.stored
+            item.image = icon
+            item.state = video == current ? .on : .off
+            menu.addItem(item)
+        }
+        add("Audio Only", .none)
+        guard #available(macOS 15, *) else { return }
+        add("Entire Screen", .screen)
+        menu.addItem(.separator())
+        var listed = Set<String>()
+        for (video, icon) in MeetingVideo.running() {
+            if case .app(let id, _) = video { listed.insert(id) }
+            add(video.label, video, icon: icon)
+        }
+        // A chosen app that isn't open stays visible, so the menu shows what the next meeting will record.
+        if case .app(let id, let name) = current, !listed.contains(id) { add("\(name) (not running)", current) }
+    }
+
+    @objc private func pickVideo(_ sender: NSMenuItem) {
+        store.chooseVideo(MeetingVideo(sender.representedObject as? String ?? ""))
+    }
+
     @objc private func toggleMeeting() {
         guard let current = meeting else {
             guard !store.transcribingMeeting else { return }
             do {
-                meeting = try Meeting()
+                // Audio keeps recording, so a screen failure is a notice, not a failed meeting.
+                weak var this: Meeting?
+                let started = try Meeting(video: store.meetingVideo) { [weak self] err in
+                    NSLog("screamr: screen not recorded, %@", err)
+                    DispatchQueue.main.async {
+                        // A late failure from an earlier meeting would read as this one's video failing.
+                        guard let self, self.meeting == nil || self.meeting === this else { return }
+                        self.flowBar.flash("Screen not recorded", err)
+                    }
+                }
+                this = started
+                meeting = started
                 store.meetingActive = true
                 meetingItem.title = "Stop Meeting Recording"
                 NSSound(named: "Hero")?.play()
-                if let err = meeting?.systemError { NSLog("screamr: recording mic only, %@", err) }
+                if let err = started.systemError { NSLog("screamr: recording mic only, %@", err) }
             } catch {
                 fail("Meeting error: \(error.localizedDescription)")
             }
             return
         }
+        let hasSystem = current.stop()
         meeting = nil
         store.meetingActive = false
-        let hasSystem = current.stop()
+        queueVideoStop(current)
         NSSound(named: "Bottle")?.play()
         transcribe(MeetingInfo(dir: current.dir, title: current.title), includeSystem: hasSystem, openWhenDone: true)
     }

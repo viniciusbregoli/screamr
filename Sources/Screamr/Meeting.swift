@@ -11,6 +11,10 @@ final class Meeting {
     private let mic = Recorder()
     private let system = SystemAudioTap()
     private(set) var systemError: String?
+    static let videoFile = "screen.mp4"
+    let video: MeetingVideo
+    private var videoStart: Task<Void, Never>?
+    private var screen: AnyObject?
 
     /// The folder name. Seconds, so two meetings started in the same minute get separate folders.
     static func stamp(_ date: Date) -> String {
@@ -20,7 +24,9 @@ final class Meeting {
         return f.string(from: date)
     }
 
-    init() throws {
+    /// `onVideoError` hears why the screen isn't being recorded, at start or mid-meeting, on any thread.
+    init(video: MeetingVideo = .none, onVideoError: @escaping (String) -> Void = { _ in }) throws {
+        self.video = video
         let stamp = Self.stamp(Date())
         title = "Meeting \(stamp)"
         dir = Self.root.appendingPathComponent(stamp, isDirectory: true)
@@ -28,6 +34,23 @@ final class Meeting {
         try mic.start(writingTo: dir.appendingPathComponent("mic.m4a"))
         // An in-person meeting still works without call audio, so this is not fatal.
         do { try system.start(writingTo: dir.appendingPathComponent("system.m4a")) } catch { systemError = error.localizedDescription }
+        guard video != .none else { return }
+        guard #available(macOS 15, *) else { onVideoError("Screen recording needs macOS 15"); return }
+        let recorder = ScreenRecorder()
+        recorder.onFailure = onVideoError
+        screen = recorder
+        let url = dir.appendingPathComponent(Self.videoFile)
+        videoStart = Task {
+            do { try await recorder.start(video, writingTo: url) } catch { onVideoError(error.localizedDescription) }
+        }
+    }
+
+    /// Finalizes screen.mp4. Separate from `stop()` because closing the file takes a moment.
+    func stopVideo() async {
+        guard #available(macOS 15, *), let recorder = screen as? ScreenRecorder else { return }
+        recorder.cancel()
+        await videoStart?.value
+        await recorder.stop()
     }
 
     /// A recording made elsewhere (a voice recorder) as a new meeting, dated when it was recorded and named
@@ -65,6 +88,8 @@ final class Meeting {
 
     /// Stops recording and returns whether the system channel has anything worth transcribing.
     func stop() -> Bool {
+        // First and synchronous, so a screen capture still starting up can't begin after the meeting ended.
+        if #available(macOS 15, *) { (screen as? ScreenRecorder)?.cancel() }
         _ = mic.stop()
         system.stop()
         return systemError == nil && system.peak > 0.001
