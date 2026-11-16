@@ -60,8 +60,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Quitting mid-meeting closes its files, so the audio can still be transcribed from the dashboard.
         if let current = meeting {
-            meeting = nil
             _ = current.stop()
+            meeting = nil
             queueVideoStop(current)
         }
         guard let pending = videoStop else { return .terminateNow }
