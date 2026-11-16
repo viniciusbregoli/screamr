@@ -67,6 +67,7 @@ final class Store: ObservableObject {
     @Published var meetingActive = false
     @Published var transcribingMeeting = false
     @Published var syncStatus = ""
+    @Published var meetingVideo = MeetingVideo.current { didSet { MeetingVideo.current = meetingVideo } }
 
     private let dir: URL
 

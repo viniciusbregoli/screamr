@@ -11,6 +11,11 @@ final class Meeting {
     private let mic = Recorder()
     private let system = SystemAudioTap()
     private(set) var systemError: String?
+    static let videoFile = "screen.mp4"
+    let video: MeetingVideo
+    private(set) var videoError: String?
+    private var videoStart: Task<Void, Never>?
+    private var screen: AnyObject?
 
     /// The folder name. Seconds, so two meetings started in the same minute get separate folders.
     static func stamp(_ date: Date) -> String {
@@ -20,7 +25,8 @@ final class Meeting {
         return f.string(from: date)
     }
 
-    init() throws {
+    init(video: MeetingVideo = .none) throws {
+        self.video = video
         let stamp = Self.stamp(Date())
         title = "Meeting \(stamp)"
         dir = Self.root.appendingPathComponent(stamp, isDirectory: true)
@@ -28,6 +34,26 @@ final class Meeting {
         try mic.start(writingTo: dir.appendingPathComponent("mic.m4a"))
         // An in-person meeting still works without call audio, so this is not fatal.
         do { try system.start(writingTo: dir.appendingPathComponent("system.m4a")) } catch { systemError = error.localizedDescription }
+        guard video != .none else { return }
+        guard #available(macOS 15, *) else { videoError = "Screen recording needs macOS 15"; return }
+        let recorder = ScreenRecorder()
+        screen = recorder
+        let url = dir.appendingPathComponent(Self.videoFile)
+        videoStart = Task { [weak self] in
+            do { try await recorder.start(video, writingTo: url) } catch { self?.videoError = error.localizedDescription }
+        }
+    }
+
+    /// Waits for the screen recording to start and returns why it didn't, if it didn't.
+    func videoStarted() async -> String? {
+        await videoStart?.value
+        return videoError
+    }
+
+    /// Finalizes screen.mp4. Separate from `stop()` because closing the file takes a moment.
+    func stopVideo() async {
+        await videoStart?.value
+        if #available(macOS 15, *) { await (screen as? ScreenRecorder)?.stop() }
     }
 
     /// A recording made elsewhere (a voice recorder) as a new meeting, dated when it was recorded and named
