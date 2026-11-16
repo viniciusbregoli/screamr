@@ -58,12 +58,33 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Quitting mid-meeting closes its files, so the audio can still be transcribed from the dashboard.
+        if let current = meeting {
+            meeting = nil
+            _ = current.stop()
+            queueVideoStop(current)
+        }
         guard let pending = videoStop else { return .terminateNow }
+        var replied = false
+        let reply = { if !replied { replied = true; sender.reply(toApplicationShouldTerminate: true) } }
         Task { @MainActor in
             await pending.value
-            sender.reply(toApplicationShouldTerminate: true)
+            reply()
         }
+        // Quit must not hang on a capture that never finishes stopping.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { reply() }
         return .terminateLater
+    }
+
+    /// Stops this meeting's capture right away; only waiting is chained, so Quit covers every pending stop.
+    private func queueVideoStop(_ m: Meeting) {
+        guard m.video != .none else { return }
+        let stop = Task { await m.stopVideo() }
+        let previous = videoStop
+        videoStop = Task {
+            await previous?.value
+            await stop.value
+        }
     }
 
     // Clicking the Dock icon while the dashboard is closed reopens it.
@@ -222,13 +243,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         meeting = nil
         store.meetingActive = false
         let hasSystem = current.stop()
-        if current.video != .none {
-            let previous = videoStop
-            videoStop = Task {
-                await previous?.value
-                await current.stopVideo()
-            }
-        }
+        queueVideoStop(current)
         NSSound(named: "Bottle")?.play()
         transcribe(MeetingInfo(dir: current.dir, title: current.title), includeSystem: hasSystem, openWhenDone: true)
     }
