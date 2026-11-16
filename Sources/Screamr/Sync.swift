@@ -159,7 +159,7 @@ actor SyncEngine {
                 if local[name] != nil { delete.append(name) }
             } else if let mine = local[name], mine != base[name] {
                 merged[name] = mine
-            } else if let theirs = remote[name], theirs != local[name], wants(name) {
+            } else if let theirs = remote[name], theirs != local[name], wants(name), syncs(name) {
                 download.append(name)
             }
         }

@@ -84,4 +84,7 @@ private func all(_: String) -> Bool { true }
     // Never in any manifest, so merge leaves the file on disk alone.
     let r = SyncEngine.merge(base: ["mic.m4a": "a1"], local: ["mic.m4a": "a1"], remote: ["mic.m4a": "a1"], wants: all)
     #expect(r.delete.isEmpty && r.download.isEmpty)
+    // A server entry for one, from any other writer, must not overwrite this Mac's recording.
+    let pushed = SyncEngine.merge(base: [:], local: [:], remote: ["screen.mp4": "v1"], wants: all)
+    #expect(pushed.download.isEmpty)
 }
