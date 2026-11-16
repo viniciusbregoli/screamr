@@ -44,7 +44,7 @@ Home (stats and dictation history), Meetings (transcripts, re-transcribe), Peopl
 
 Dictionary words are sent to Scribe as key terms. A replacement also rewrites what Scribe heard, which is how to fix names that sound like common words (Screamer to screamr). Snippets expand a spoken trigger phrase into text. Data lives in `~/Library/Application Support/Screamr/`.
 
-Meetings are saved to `~/Library/Application Support/Screamr/Meetings/<date>/` as `mic.m4a`, `system.m4a` and `transcript.md`. Give a meeting a title with Cmd+R (or "Rename meeting" in the palette); it lives in the folder's `title.txt`, heads the transcript and syncs to the iPhone. An empty title goes back to the date. The mic channel is labeled "You" (or "Room N" when several people share the mic); call audio is diarized into "Speaker N". Use headphones on calls, otherwise the mic also picks up the other side.
+Meetings are saved to `~/Library/Application Support/Screamr/Meetings/<date>/` as `mic.m4a`, `system.m4a` and `transcript.md`. Give a meeting a title with Cmd+R (or "Rename meeting" in the palette); it lives in the folder's `title.txt`, heads the transcript and syncs to the iPhone. An empty title goes back to the date. The mic channel is labeled "You" (or "Room N" when several people share the mic); call audio is diarized into "Speaker N". Use headphones on calls, otherwise the mic also picks up the other side. A meeting can also record the entire screen or one app (Meeting Video in the menu bar, or the picker next to Record meeting; macOS 15+, needs the Screen Recording permission). It is saved as `screen.mp4` with your mic and the call audio, and stays on this Mac (it is not synced).
 
 ## People
 
