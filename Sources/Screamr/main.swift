@@ -193,20 +193,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let current = meeting else {
             guard !store.transcribingMeeting else { return }
             do {
-                let started = try Meeting(video: store.meetingVideo)
+                // Audio keeps recording, so a screen failure is a notice, not a failed meeting.
+                let started = try Meeting(video: store.meetingVideo) { [weak self] err in
+                    NSLog("screamr: screen not recorded, %@", err)
+                    DispatchQueue.main.async { self?.flowBar.flash("Screen not recorded", err) }
+                }
                 meeting = started
                 store.meetingActive = true
                 meetingItem.title = "Stop Meeting Recording"
                 NSSound(named: "Hero")?.play()
                 if let err = started.systemError { NSLog("screamr: recording mic only, %@", err) }
-                if started.video != .none {
-                    // Audio keeps recording, so a screen failure is a notice, not a failed meeting.
-                    Task { @MainActor in
-                        guard let err = await started.videoStarted() else { return }
-                        NSLog("screamr: screen not recorded, %@", err)
-                        flowBar.flash("Screen not recorded", err)
-                    }
-                }
             } catch {
                 fail("Meeting error: \(error.localizedDescription)")
             }

@@ -13,7 +13,6 @@ final class Meeting {
     private(set) var systemError: String?
     static let videoFile = "screen.mp4"
     let video: MeetingVideo
-    private(set) var videoError: String?
     private var videoStart: Task<Void, Never>?
     private var screen: AnyObject?
 
@@ -25,7 +24,8 @@ final class Meeting {
         return f.string(from: date)
     }
 
-    init(video: MeetingVideo = .none) throws {
+    /// `onVideoError` hears why the screen isn't being recorded, at start or mid-meeting, on any thread.
+    init(video: MeetingVideo = .none, onVideoError: @escaping (String) -> Void = { _ in }) throws {
         self.video = video
         let stamp = Self.stamp(Date())
         title = "Meeting \(stamp)"
@@ -35,19 +35,14 @@ final class Meeting {
         // An in-person meeting still works without call audio, so this is not fatal.
         do { try system.start(writingTo: dir.appendingPathComponent("system.m4a")) } catch { systemError = error.localizedDescription }
         guard video != .none else { return }
-        guard #available(macOS 15, *) else { videoError = "Screen recording needs macOS 15"; return }
+        guard #available(macOS 15, *) else { onVideoError("Screen recording needs macOS 15"); return }
         let recorder = ScreenRecorder()
+        recorder.onFailure = onVideoError
         screen = recorder
         let url = dir.appendingPathComponent(Self.videoFile)
-        videoStart = Task { [weak self] in
-            do { try await recorder.start(video, writingTo: url) } catch { self?.videoError = error.localizedDescription }
+        videoStart = Task {
+            do { try await recorder.start(video, writingTo: url) } catch { onVideoError(error.localizedDescription) }
         }
-    }
-
-    /// Waits for the screen recording to start and returns why it didn't, if it didn't.
-    func videoStarted() async -> String? {
-        await videoStart?.value
-        return videoError
     }
 
     /// Finalizes screen.mp4. Separate from `stop()` because closing the file takes a moment.

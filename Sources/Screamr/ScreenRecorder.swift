@@ -69,7 +69,7 @@ enum MeetingVideo: Equatable {
 /// Records the screen or one app's windows to an mp4 with ScreenCaptureKit's recording output (macOS 15+).
 /// Needs the Screen Recording permission, which macOS prompts for on first use.
 @available(macOS 15, *)
-final class ScreenRecorder: NSObject, SCRecordingOutputDelegate, @unchecked Sendable {
+final class ScreenRecorder: NSObject, SCRecordingOutputDelegate, SCStreamDelegate, @unchecked Sendable {
     struct Failure: LocalizedError {
         let errorDescription: String?
     }
@@ -78,6 +78,9 @@ final class ScreenRecorder: NSObject, SCRecordingOutputDelegate, @unchecked Send
     private var finished: CheckedContinuation<Void, Never>?
     private var didFinish = false
     private var cancelled = false
+    private var reported = false
+    /// Failures after start (the recorded app quit, the disk filled), so the meeting can say the video stopped.
+    var onFailure: ((String) -> Void)?
     private let lock = NSLock()
 
     /// Called on stop, before waiting for a start that may still be loading, so capture never begins after the meeting ended.
@@ -132,7 +135,7 @@ final class ScreenRecorder: NSObject, SCRecordingOutputDelegate, @unchecked Send
         recording.videoCodecType = .hevc
 
         guard !lock.withLock({ cancelled }) else { return }
-        let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addRecordingOutput(SCRecordingOutput(configuration: recording, delegate: self))
         self.stream = stream
         try await stream.startCapture()
@@ -168,8 +171,16 @@ final class ScreenRecorder: NSObject, SCRecordingOutputDelegate, @unchecked Send
     func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) { finish() }
 
     func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
-        NSLog("screamr: screen recording failed, %@", error.localizedDescription)
+        report(error)
         finish()
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) { report(error) }
+
+    /// Once: a stopped stream usually also fails its recording output.
+    private func report(_ error: Error) {
+        guard lock.withLock({ () -> Bool in defer { reported = true }; return !reported }) else { return }
+        onFailure?("Screen recording stopped: \(error.localizedDescription)")
     }
 
     /// The display holding the most area of the app's windows.
