@@ -84,6 +84,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         videoStop = Task {
             await previous?.value
             await stop.value
+            // The dashboard shows the play button only once screen.mp4 is written.
+            await MainActor.run { store.refreshMeetings() }
         }
     }
 
@@ -226,10 +228,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard !store.transcribingMeeting else { return }
             do {
                 // Audio keeps recording, so a screen failure is a notice, not a failed meeting.
+                weak var this: Meeting?
                 let started = try Meeting(video: store.meetingVideo) { [weak self] err in
                     NSLog("screamr: screen not recorded, %@", err)
-                    DispatchQueue.main.async { self?.flowBar.flash("Screen not recorded", err) }
+                    DispatchQueue.main.async {
+                        // A late failure from an earlier meeting would read as this one's video failing.
+                        guard let self, self.meeting == nil || self.meeting === this else { return }
+                        self.flowBar.flash("Screen not recorded", err)
+                    }
                 }
+                this = started
                 meeting = started
                 store.meetingActive = true
                 meetingItem.title = "Stop Meeting Recording"
