@@ -88,6 +88,8 @@ final class Meeting {
 
     /// Stops recording and returns whether the system channel has anything worth transcribing.
     func stop() -> Bool {
+        // First and synchronous, so a screen capture still starting up can't begin after the meeting ended.
+        if #available(macOS 15, *) { (screen as? ScreenRecorder)?.cancel() }
         _ = mic.stop()
         system.stop()
         return systemError == nil && system.peak > 0.001

@@ -240,9 +240,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             return
         }
+        let hasSystem = current.stop()
         meeting = nil
         store.meetingActive = false
-        let hasSystem = current.stop()
         queueVideoStop(current)
         NSSound(named: "Bottle")?.play()
         transcribe(MeetingInfo(dir: current.dir, title: current.title), includeSystem: hasSystem, openWhenDone: true)
