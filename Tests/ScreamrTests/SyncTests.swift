@@ -76,3 +76,12 @@ private func all(_: String) -> Bool { true }
     #expect(r.merged == ["title.txt": "mine"])
     #expect(r.download.isEmpty)
 }
+
+@Test func screenRecordingsStayOutOfTheSync() {
+    #expect(!SyncEngine.syncs("screen.mp4"))
+    #expect(!SyncEngine.syncs(".DS_Store"))
+    #expect(SyncEngine.syncs("mic.m4a"))
+    // Never in any manifest, so merge leaves the file on disk alone.
+    let r = SyncEngine.merge(base: ["mic.m4a": "a1"], local: ["mic.m4a": "a1"], remote: ["mic.m4a": "a1"], wants: all)
+    #expect(r.delete.isEmpty && r.download.isEmpty)
+}

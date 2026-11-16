@@ -171,12 +171,17 @@ actor SyncEngine {
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Videos can be gigabytes, so they stay on the Mac that recorded them.
+    static let localOnly: Set<String> = ["screen.mp4"]
+
+    static func syncs(_ name: String) -> Bool { !name.hasPrefix(".") && !localOnly.contains(name) }
+
     // ponytail: hashes every file on every run; cache by size and mtime if long meeting libraries make sync slow.
     private func manifest(_ dir: URL) throws -> Manifest {
         guard FileManager.default.fileExists(atPath: dir.path) else { return [:] }
         var out: Manifest = [:]
         for url in try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isRegularFileKey])
-        where !url.lastPathComponent.hasPrefix(".") && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+        where Self.syncs(url.lastPathComponent) && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
             out[url.lastPathComponent] = try Self.sha256(url)
         }
         return out
