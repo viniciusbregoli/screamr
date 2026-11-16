@@ -186,7 +186,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func pickVideo(_ sender: NSMenuItem) {
-        store.meetingVideo = MeetingVideo(sender.representedObject as? String ?? "")
+        store.chooseVideo(MeetingVideo(sender.representedObject as? String ?? ""))
     }
 
     @objc private func toggleMeeting() {

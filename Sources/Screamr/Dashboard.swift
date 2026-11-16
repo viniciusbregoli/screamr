@@ -180,13 +180,13 @@ struct Dashboard: View {
 
     private var videoMenu: some View {
         Menu {
-            Button(MeetingVideo.none.label) { store.meetingVideo = .none }
+            Button(MeetingVideo.none.label) { store.chooseVideo(.none) }
             if #available(macOS 15, *) {
-                Button(MeetingVideo.screen.label) { store.meetingVideo = .screen }
+                Button(MeetingVideo.screen.label) { store.chooseVideo(.screen) }
                 let apps = MeetingVideo.running()
                 if !apps.isEmpty { Divider() }
                 ForEach(apps.indices, id: \.self) { i in
-                    Button(apps[i].video.label) { store.meetingVideo = apps[i].video }
+                    Button(apps[i].video.label) { store.chooseVideo(apps[i].video) }
                 }
             }
         } label: {
@@ -215,14 +215,14 @@ struct Dashboard: View {
 
     private var videoCommands: [PaletteCommand] {
         guard #available(macOS 15, *) else { return [] }
-        return [PaletteCommand(title: "Meeting video: Entire screen", hint: "") { store.meetingVideo = .screen }]
-            + MeetingVideo.running().map { app in PaletteCommand(title: "Meeting video: \(app.video.label)", hint: "") { store.meetingVideo = app.video } }
+        return [PaletteCommand(title: "Meeting video: Entire screen", hint: "") { store.chooseVideo(.screen) }]
+            + MeetingVideo.running().map { app in PaletteCommand(title: "Meeting video: \(app.video.label)", hint: "") { store.chooseVideo(app.video) } }
     }
 
     private var commands: [PaletteCommand] {
         Pane.allCases.map { p in PaletteCommand(title: "Go to \(p.rawValue)", hint: "⌘\(String(p.key.character))") { pane = p } } + [
             PaletteCommand(title: store.meetingActive ? "Stop meeting recording" : "Start meeting recording", hint: "⌃⌥⌘M", run: actions.toggleMeeting),
-            PaletteCommand(title: "Meeting video: Audio only", hint: "") { store.meetingVideo = .none },
+            PaletteCommand(title: "Meeting video: Audio only", hint: "") { store.chooseVideo(.none) },
         ] + videoCommands + [
             PaletteCommand(title: "Import a recording", hint: "⌘I") { pane = .meetings; actions.importRecording() },
             PaletteCommand(title: "Search dictation history", hint: "/") { pane = .home; searchRequest += 1 },

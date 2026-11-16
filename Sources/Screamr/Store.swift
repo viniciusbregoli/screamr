@@ -67,7 +67,13 @@ final class Store: ObservableObject {
     @Published var meetingActive = false
     @Published var transcribingMeeting = false
     @Published var syncStatus = ""
-    @Published var meetingVideo = MeetingVideo.current { didSet { MeetingVideo.current = meetingVideo } }
+    @Published private(set) var meetingVideo = MeetingVideo.current { didSet { MeetingVideo.current = meetingVideo } }
+
+    /// Checked when the choice is made, so a menu or palette opened before the meeting started can't change it mid-recording.
+    func chooseVideo(_ video: MeetingVideo) {
+        guard !meetingActive else { return }
+        meetingVideo = video
+    }
 
     private let dir: URL
 
