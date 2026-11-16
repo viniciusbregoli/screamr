@@ -140,22 +140,28 @@ struct Dashboard: View {
                 .buttonStyle(.plain)
             }
             Spacer()
-            Button(action: actions.toggleMeeting) {
-                HStack(spacing: 8) {
-                    Image(systemName: store.meetingActive ? "stop.fill" : "circle.fill")
-                        .zfont(store.meetingActive ? 10 : 9)
-                        .foregroundStyle(store.meetingActive ? Theme.crust : Theme.red)
-                        .glow(store.meetingActive ? .clear : Theme.red, radius: 4)
-                    Text(store.transcribingMeeting ? "Transcribing..." : store.meetingActive ? "Stop meeting" : "Record meeting")
+            HStack(spacing: 6) {
+                Button(action: actions.toggleMeeting) {
+                    HStack(spacing: 8) {
+                        Image(systemName: store.meetingActive ? "stop.fill" : "circle.fill")
+                            .zfont(store.meetingActive ? 10 : 9)
+                            .foregroundStyle(store.meetingActive ? Theme.crust : Theme.red)
+                            .glow(store.meetingActive ? .clear : Theme.red, radius: 4)
+                        Text(store.transcribingMeeting ? "Transcribing..." : store.meetingActive ? "Stop meeting" : "Record meeting")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(store.meetingActive ? Theme.red : Theme.surface0, in: RoundedRectangle(cornerRadius: 8))
+                    .foregroundStyle(store.meetingActive ? Theme.crust : Theme.text)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(store.meetingActive ? Theme.red : Theme.surface0, in: RoundedRectangle(cornerRadius: 8))
-                .foregroundStyle(store.meetingActive ? Theme.crust : Theme.text)
+                .buttonStyle(.plain)
+                .disabled(store.transcribingMeeting)
+                .help("⌃⌥⌘M")
+                videoMenu
             }
-            .buttonStyle(.plain)
-            .disabled(store.transcribingMeeting)
-            .help("⌃⌥⌘M")
+            if store.meetingVideo != .none {
+                Text(store.meetingVideo.label).zfont(11).foregroundStyle(Theme.overlay2).lineLimit(1)
+            }
             HStack(spacing: 6) { KeyChip("⌘K"); Text("Commands"); Spacer(); KeyChip("?"); Text("Help") }
                 .zfont(11).foregroundStyle(Theme.overlay2).padding(.top, 10).padding(.horizontal, 2)
         }
@@ -170,6 +176,26 @@ struct Dashboard: View {
             .clipped()
         }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private var videoMenu: some View {
+        Menu {
+            Button(MeetingVideo.none.label) { store.meetingVideo = .none }
+            if #available(macOS 15, *) {
+                Button(MeetingVideo.screen.label) { store.meetingVideo = .screen }
+                let apps = MeetingVideo.running()
+                if !apps.isEmpty { Divider() }
+                ForEach(apps.indices, id: \.self) { i in
+                    Button(apps[i].video.label) { store.meetingVideo = apps[i].video }
+                }
+            }
+        } label: {
+            Image(systemName: store.meetingVideo == .none ? "video.slash" : "video").zfont(13)
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .foregroundStyle(store.meetingVideo == .none ? Theme.overlay2 : Theme.text)
+        .disabled(store.meetingActive || store.transcribingMeeting)
+        .help("Meeting video: \(store.meetingVideo.label)")
     }
 
     private var shortcutButtons: some View {
@@ -187,9 +213,17 @@ struct Dashboard: View {
         .allowsHitTesting(false)
     }
 
+    private var videoCommands: [PaletteCommand] {
+        guard #available(macOS 15, *) else { return [] }
+        return [PaletteCommand(title: "Meeting video: Entire screen", hint: "") { store.meetingVideo = .screen }]
+            + MeetingVideo.running().map { app in PaletteCommand(title: "Meeting video: \(app.video.label)", hint: "") { store.meetingVideo = app.video } }
+    }
+
     private var commands: [PaletteCommand] {
         Pane.allCases.map { p in PaletteCommand(title: "Go to \(p.rawValue)", hint: "⌘\(String(p.key.character))") { pane = p } } + [
             PaletteCommand(title: store.meetingActive ? "Stop meeting recording" : "Start meeting recording", hint: "⌃⌥⌘M", run: actions.toggleMeeting),
+            PaletteCommand(title: "Meeting video: Audio only", hint: "") { store.meetingVideo = .none },
+        ] + videoCommands + [
             PaletteCommand(title: "Import a recording", hint: "⌘I") { pane = .meetings; actions.importRecording() },
             PaletteCommand(title: "Search dictation history", hint: "/") { pane = .home; searchRequest += 1 },
             PaletteCommand(title: "Rename meeting", hint: "⌘R") { pane = .meetings; renameRequested = true },
@@ -576,6 +610,11 @@ private struct MeetingsPane: View {
                 Button(m.transcript == nil ? "Transcribe" : "Re-transcribe") { actions.retranscribe(m) }
                     // Audio is retired 90 days after the meeting; the transcript stays.
                     .disabled(store.transcribingMeeting || !FileManager.default.fileExists(atPath: m.dir.appendingPathComponent("mic.m4a").path))
+                let screen = m.dir.appendingPathComponent(Meeting.videoFile)
+                if FileManager.default.fileExists(atPath: screen.path) {
+                    Button { NSWorkspace.shared.open(screen) } label: { Image(systemName: "play.rectangle") }
+                        .help("Open screen recording")
+                }
                 Button { NSWorkspace.shared.activateFileViewerSelecting([m.dir]) } label: { Image(systemName: "folder") }
                     .help("Reveal in Finder")
                 Button(role: .destructive) {
